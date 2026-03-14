@@ -43,7 +43,7 @@ def load_data():
             df[col] = df[col].fillna("-").astype(str).str.strip().str.upper()
             df[col] = df[col].replace(['NAN', 'NONE', '', ' ', 'NULL'], '-')
         
-        # Base de Responsáveis Únicos
+        # Base de Responsáveis Únicos para os filtros
         df_familias = df[df["NOME DO RESPONSÁVEL"] != "-"].drop_duplicates(subset=["NOME DO RESPONSÁVEL"])
         
         return df, df_familias
@@ -54,24 +54,45 @@ def load_data():
 df_geral, df_familias = load_data()
 
 if df_geral is not None:
-    # --- 4. CABEÇALHO ---
+    # --- 4. FILTROS NA ESQUERDA (SIDEBAR) ---
+    st.sidebar.header("🔍 Filtrar Responsáveis")
+    
+    # Colunas exatas da sua planilha
+    col_trab = "EXERCE ATIVIDADE REMUNERADA:"
+    col_renda = "RENDA FAMILIAR TOTAL"
+
+    # Opções dinâmicas baseadas na planilha
+    opcoes_trab = sorted(df_familias[col_trab].unique())
+    opcoes_renda = sorted(df_familias[col_renda].unique())
+
+    filtro_trab = st.sidebar.multiselect("Está trabalhando?", opcoes_trab, default=opcoes_trab)
+    filtro_renda = st.sidebar.multiselect("Faixa de Renda:", opcoes_renda, default=opcoes_renda)
+
+    # Aplicação dos filtros na lista de nomes
+    df_filtrado = df_familias[
+        (df_familias[col_trab].isin(filtro_trab)) & 
+        (df_familias[col_renda].isin(filtro_renda))
+    ]
+
+    # --- 5. CABEÇALHO ---
     st.markdown('<div class="main-header"><h1>Painel Socioeconômico CAS</h1></div>', unsafe_allow_html=True)
     
-    # --- 5. SELEÇÃO DE RESPONSÁVEL (Acesso Direto) ---
-    lista_nomes = sorted(df_familias["NOME DO RESPONSÁVEL"].unique().tolist())
-    selecionado = st.selectbox("🎯 Localizar Responsável para Prontuário Social:", ["-- SELECIONE UM NOME NA LISTA --"] + lista_nomes)
+    # --- 6. SELEÇÃO DE RESPONSÁVEL (Ajustada pelos filtros) ---
+    lista_nomes = sorted(df_filtrado["NOME DO RESPONSÁVEL"].unique().tolist())
+    
+    st.write(f"Filtrados: **{len(lista_nomes)}** responsáveis encontrados.")
+    selecionado = st.selectbox("🎯 Localizar Responsável:", ["-- SELECIONE UM NOME NA LISTA --"] + lista_nomes)
 
-    # --- 6. PRONTUÁRIO DETALHADO ---
+    # --- 7. PRONTUÁRIO DETALHADO ---
     if selecionado != "-- SELECIONE UM NOME NA LISTA --":
         st.write("---")
         
-        # Dados da Família
         familia_rows = df_geral[df_geral["NOME DO RESPONSÁVEL"] == selecionado]
         principal = familia_rows.iloc[0]
 
         st.subheader(f"🏠 Ficha Social: {selecionado}")
         
-        # Grid Dinâmico (Todas as colunas da planilha viram cartões)
+        # Grid com todas as informações
         st.write("### 📖 Cadastro Socioeconômico")
         grid = st.columns(4)
         for i, col in enumerate(df_geral.columns):
@@ -82,29 +103,29 @@ if df_geral is not None:
                 </div>''', unsafe_allow_html=True)
 
         st.write("---")
-        # Listagem de quem desta família está inscrito
-        st.write(f"### 👨‍👩‍👧‍👦 Integrantes desta Família em Atividade ({len(familia_rows)})")
+        st.write(f"### 👨‍👩‍👧‍👦 Membros da Família Inscritos ({len(familia_rows)})")
         st.table(familia_rows[["NOME DO PARTICIPANTE (ATIVIDADES)", "ATIVIDADE DESEJADA", "TURNO", "IDADE (PARTICIPANTE)"]])
 
-    # --- 7. EXPORTAÇÃO NA LATERAL ---
+    # --- 8. EXPORTAÇÃO ---
+    st.sidebar.write("---")
     st.sidebar.header("📋 Exportação")
-    if st.sidebar.button("➕ Adicionar Atual à Lista"):
+    if st.sidebar.button("➕ Adicionar à Lista"):
         if selecionado != "-- SELECIONE UM NOME NA LISTA --":
             if selecionado not in st.session_state.lista_exportacao:
                 st.session_state.lista_exportacao.append(selecionado)
                 st.rerun()
 
     if st.session_state.lista_exportacao:
-        st.sidebar.write(f"Itens selecionados: {len(st.session_state.lista_exportacao)}")
-        if st.sidebar.button("📥 Baixar Excel"):
+        st.sidebar.write(f"Selecionados: {len(st.session_state.lista_exportacao)}")
+        if st.sidebar.button("📥 Baixar Relatório Excel"):
             df_exp = df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(st.session_state.lista_exportacao)]
             buf = BytesIO()
             with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
                 df_exp.to_excel(writer, index=False)
-            st.sidebar.download_button("Clique para salvar", buf.getvalue(), "Relatorio_CAS.xlsx")
+            st.sidebar.download_button("Salvar Arquivo", buf.getvalue(), "Relatorio_CAS.xlsx")
         
-        if st.sidebar.button("🗑️ Limpar Tudo"):
+        if st.sidebar.button("🗑️ Limpar Lista"):
             st.session_state.lista_exportacao = []
             st.rerun()
 else:
-    st.info("Aguardando detecção da 'Planilha Matriculados' na pasta.")
+    st.info("Planilha não encontrada. Verifique o arquivo na pasta.")
