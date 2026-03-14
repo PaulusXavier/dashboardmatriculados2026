@@ -4,7 +4,7 @@ import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Gestão CAS - Prontuário Completo", layout="wide", page_icon="🏠")
+st.set_page_config(page_title="Gestão CAS - Visão 360", layout="wide", page_icon="🏠")
 
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
@@ -19,20 +19,20 @@ st.markdown("""
         padding: 1.5rem; border-radius: 0.8rem; color: white; text-align: center; margin-bottom: 2rem;
     }
     .section-header {
-        background-color: #ffffff; padding: 10px 15px; border-left: 5px solid #3b82f6;
+        background-color: #ffffff; padding: 10px 15px; border-left: 5px solid #2563eb;
         border-radius: 4px; font-weight: 800; color: #1e293b; margin: 25px 0 10px 0;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     }
     .info-card {
         background: white; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;
-        margin-bottom: 8px; min-height: 70px; display: flex; flex-direction: column; justify-content: center;
+        margin-bottom: 8px; min-height: 75px; display: flex; flex-direction: column;
     }
-    .label-title { color: #64748b; font-size: 0.65rem; font-weight: 800; text-transform: uppercase; line-height: 1.2; }
+    .label-title { color: #64748b; font-size: 0.65rem; font-weight: 800; text-transform: uppercase; }
     .value-text { color: #1e293b; font-size: 0.85rem; font-weight: 600; margin-top: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO E LIMPEZA ---
+# --- 3. CARREGAMENTO E LOGICA DE RANKING ---
 @st.cache_data
 def load_data():
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
@@ -49,89 +49,96 @@ def load_data():
         
         df_fam = df[df["NOME DO RESPONSÁVEL"] != "-"].drop_duplicates(subset=["NOME DO RESPONSÁVEL"]).copy()
         
-        # Ranking de vulnerabilidade para a lista lateral
-        def rank_vulnerabilidade(row):
+        # Ranking de vulnerabilidade para organizar a lista
+        def calcular_rank(row):
             pts = 0
             membros = len(df[df["NOME DO RESPONSÁVEL"] == row["NOME DO RESPONSÁVEL"]])
             pts += (membros * 10)
-            if "SIM" in str(row.get("PESSOA COM DEFICIÊNCIA (RESPONSÁVEL)", "")): pts += 50
-            if "NÃO" in str(row.get("EXERCE ATIVIDADE REMUNERADA:", "")): pts += 40
+            if "NÃO" in str(row.get("EXERCE ATIVIDADE REMUNERADA:", "")): pts += 50
+            if "ATÉ R$ 606" in str(row.get("RENDA FAMILIAR TOTAL", "")): pts += 40
             return pts
         
-        df_fam["RANKING"] = df_fam.apply(rank_vulnerabilidade, axis=1)
+        df_fam["RANK"] = df_fam.apply(calcular_rank, axis=1)
         return df, df_fam
     except Exception as e:
-        st.error(f"Erro ao ler os dados: {e}")
+        st.error(f"Erro: {e}")
         return None, None
 
 df_geral, df_fam = load_data()
 
 if df_geral is not None:
     # --- 4. SEU CRUZAMENTO (FILTROS NA ESQUERDA) ---
-    st.sidebar.header("🛠️ Seu Cruzamento")
-    col_trab = "EXERCE ATIVIDADE REMUNERADA:"
-    col_renda = "RENDA FAMILIAR TOTAL"
+    st.sidebar.header("🛠️ Cruzamento Manual")
+    op_trab = sorted(df_fam["EXERCE ATIVIDADE REMUNERADA:"].unique())
+    op_renda = sorted(df_fam["RENDA FAMILIAR TOTAL"].unique())
     
-    f_trab = st.sidebar.multiselect("Status de Trabalho:", sorted(df_fam[col_trab].unique()), default=list(df_fam[col_trab].unique()))
-    f_renda = st.sidebar.multiselect("Faixa de Renda:", sorted(df_fam[col_renda].unique()), default=list(df_fam[col_renda].unique()))
+    f_trab = st.sidebar.multiselect("Status de Trabalho:", op_trab, default=op_trab)
+    f_renda = st.sidebar.multiselect("Faixa de Renda:", op_renda, default=op_renda)
 
-    # Aplicar Filtros e Ordenar por Vulnerabilidade
     df_filtrado = df_fam[
-        (df_fam[col_trab].isin(f_trab)) & 
-        (df_fam[col_renda].isin(f_renda))
-    ].sort_values(by="RANKING", ascending=False)
+        (df_fam["EXERCE ATIVIDADE REMUNERADA:"].isin(f_trab)) & 
+        (df_fam["RENDA FAMILIAR TOTAL"].isin(f_renda))
+    ].sort_values(by="RANK", ascending=False)
 
-    # --- 5. TÍTULO ---
-    st.markdown('<div class="main-header"><h1>Painel Socioeconômico e Familiar CAS</h1></div>', unsafe_allow_html=True)
+    # --- 5. TÍTULO E BUSCA ---
+    st.markdown('<div class="main-header"><h1>Painel de Avaliação Social CAS</h1></div>', unsafe_allow_html=True)
     
     lista_nomes = df_filtrado["NOME DO RESPONSÁVEL"].tolist()
-    selecionado = st.selectbox(f"🎯 Selecione a Família ({len(lista_nomes)} encontradas):", ["-- SELECIONE --"] + lista_nomes)
+    selecionado = st.selectbox(f"🎯 Famílias Filtradas: {len(lista_nomes)} (Ordenadas por Risco)", ["-- SELECIONE --"] + lista_nomes)
 
     if selecionado != "-- SELECIONE --":
-        # Puxa todos os registros que contêm esse responsável
-        dados_familia = df_geral[df_geral["NOME DO RESPONSÁVEL"] == selecionado]
-        # Pega a primeira linha para os dados gerais do responsável/casa
-        principal = dados_familia.iloc[0]
+        # Dados da Família
+        dados_f = df_geral[df_geral["NOME DO RESPONSÁVEL"] == selecionado]
+        principal = dados_f.iloc[0]
 
-        # --- QUADRO 1: DADOS COMPLETOS DO RESPONSÁVEL (Todas as Colunas) ---
-        st.markdown(f'<div class="section-header">📑 DADOS COMPLETOS DO RESPONSÁVEL: {selecionado}</div>', unsafe_allow_html=True)
+        # --- QUADRO 1: RESPONSÁVEL E LOCALIZAÇÃO (O QUE VOCÊ QUER PRIMEIRO) ---
+        st.markdown('<div class="section-header">📍 DADOS DO RESPONSÁVEL E LOCALIZAÇÃO</div>', unsafe_allow_html=True)
         
-        # Cria um grid para mostrar TODAS as colunas que pertencem ao responsável/família
-        cols_grid = st.columns(4)
-        for i, coluna in enumerate(df_geral.columns):
-            with cols_grid[i % 4]:
-                st.markdown(f'''
-                    <div class="info-card">
-                        <div class="label-title">{coluna}</div>
-                        <div class="value-text">{principal[coluna]}</div>
-                    </div>
-                ''', unsafe_allow_html=True)
+        # Colunas prioritárias de identificação
+        cols_id = ["NOME DO RESPONSÁVEL", "IDADE DO RESPONSÁVEL", "ENDEREÇO", "BAIRRO", "CONTATO", "CPF", "PESSOA COM DEFICIÊNCIA (RESPONSÁVEL)"]
+        cols_id = [c for c in cols_id if c in df_geral.columns] # Garante que a coluna existe
+        
+        c_id = st.columns(4)
+        for i, col in enumerate(cols_id):
+            with c_id[i % 4]:
+                st.markdown(f'<div class="info-card"><div class="label-title">{col}</div><div class="value-text">{principal[col]}</div></div>', unsafe_allow_html=True)
 
-        # --- QUADRO 2: DADOS DOS PARTICIPANTES (Todos os familiares) ---
-        st.markdown('<div class="section-header">👨‍👩‍👧‍👦 MEMBROS DA FAMÍLIA E PARTICIPAÇÃO NO CAS</div>', unsafe_allow_html=True)
+        # --- QUADRO 2: DEMAIS DADOS SOCIOECONÔMICOS ---
+        st.markdown('<div class="section-header">⚖️ PERFIL SOCIOECONÔMICO DA FAMÍLIA</div>', unsafe_allow_html=True)
         
-        # Mostra a tabela completa dos familiares vinculados
-        # Aqui ele mostra todas as colunas relevantes para os participantes
-        st.dataframe(dados_familia, use_container_width=True)
+        # Mostra o restante das colunas que não apareceram no quadro anterior, exceto as do participante
+        cols_socio = [c for c in df_geral.columns if c not in cols_id and "PARTICIPANTE" not in c and "ATIVIDADE" not in c]
         
-        st.write("---")
-        st.write("💡 *Dica: Você pode rolar a tabela acima para os lados para ver todas as colunas de cada participante.*")
+        if cols_socio:
+            c_soc = st.columns(4)
+            for i, col in enumerate(cols_socio):
+                with c_soc[i % 4]:
+                    st.markdown(f'<div class="info-card"><div class="label-title">{col}</div><div class="value-text">{principal[col]}</div></div>', unsafe_allow_html=True)
+
+        # --- QUADRO 3: DADOS DOS PARTICIPANTES (POR ÚLTIMO) ---
+        st.markdown('<div class="section-header">👨‍👩‍👧‍👦 DADOS DOS PARTICIPANTES VINCULADOS</div>', unsafe_allow_html=True)
+        
+        # Filtrando apenas colunas que mencionam participante ou atividade
+        cols_part = [c for c in df_geral.columns if "PARTICIPANTE" in c or "ATIVIDADE" in c or "TURNO" in c]
+        if not cols_part: cols_part = df_geral.columns # Backup caso as colunas tenham nomes diferentes
+        
+        st.dataframe(dados_f[cols_part], use_container_width=True)
 
     # --- 6. EXPORTAÇÃO ---
     st.sidebar.write("---")
-    if st.sidebar.button("➕ Adicionar para Relatório"):
+    if st.sidebar.button("➕ Adicionar à Lista"):
         if selecionado != "-- SELECIONE --":
             if selecionado not in st.session_state.lista_exportacao:
                 st.session_state.lista_exportacao.append(selecionado)
                 st.rerun()
 
     if st.session_state.lista_exportacao:
-        st.sidebar.success(f"{len(st.session_state.lista_exportacao)} famílias prontas")
-        if st.sidebar.button("📥 Gerar Excel Completo"):
+        st.sidebar.write(f"Itens selecionados: {len(st.session_state.lista_exportacao)}")
+        if st.sidebar.button("📥 Baixar Excel"):
             df_exp = df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(st.session_state.lista_exportacao)]
             buf = BytesIO()
             with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
                 df_exp.to_excel(writer, index=False)
-            st.sidebar.download_button("Baixar Arquivo", buf.getvalue(), "Relatorio_Familiar_Completo.xlsx")
+            st.sidebar.download_button("Clique aqui", buf.getvalue(), "Relatorio_CAS.xlsx")
 else:
-    st.info("Arquivo 'Planilha Matriculados' não encontrado.")
+    st.info("Planilha 'Planilha Matriculados' não encontrada na pasta.")
