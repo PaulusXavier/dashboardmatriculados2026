@@ -7,10 +7,11 @@ from io import BytesIO
 # 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="CAS 2026 | Gestão Social", layout="wide", page_icon="📊")
 
+# Inicializa a lista de exportação se não existir
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
 
-# --- 2. CSS PARA DESIGN SÓBRIO (CORES ESCURAS) ---
+# --- 2. CSS PARA DESIGN DE ALTO IMPACTO (CORES ESCURAS E PROFISSIONAIS) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
@@ -20,101 +21,124 @@ st.markdown("""
         padding: 40px; border-radius: 20px; color: white; text-align: center; margin-bottom: 30px;
     }
     .kpi-box {
-        background: white; padding: 25px; border-radius: 15px; border-bottom: 5px solid #1e40af;
+        background: #ffffff; padding: 25px; border-radius: 15px; border-bottom: 5px solid #1e40af;
         text-align: center; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
     }
-    .kpi-title { color: #475569; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; }
-    .kpi-value { color: #1e293b; font-size: 2.8rem; font-weight: 800; }
+    .kpi-title { color: #475569; font-size: 0.9rem; font-weight: 800; text-transform: uppercase; }
+    .kpi-value { color: #1e293b; font-size: 3rem; font-weight: 800; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO E LIMPEZA COM FOCO NO RESPONSÁVEL ---
+# --- 3. CARREGAMENTO E LIMPEZA DE DADOS ---
 @st.cache_data
 def load_and_clean_data():
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
-    if not arquivos: return None, None
+    if not arquivos: return None
     path = arquivos[0]
     try:
+        # Carrega os dados garantindo que tudo seja tratado como texto inicialmente
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
-        df.columns = [str(c).strip().upper() for c in df.columns]
+        df.columns = [str(c).strip().replace('\n', ' ').upper() for c in df.columns]
         
-        # Limpeza de strings
+        # Limpeza de espaços e padronização
         for col in df.columns:
             df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip().str.upper()
             df[col] = df[col].replace(['NAN', 'NONE', ''], 'NÃO INFORMADO')
         
-        # FILTRO DE FAMÍLIAS: Remove vazios e pega apenas 1 linha por Responsável para o Censo Social
-        df_limpo = df[df["NOME DO RESPONSÁVEL"] != "NÃO INFORMADO"]
-        df_familias = df_limpo.drop_duplicates(subset=["NOME DO RESPONSÁVEL"])
-        
-        return df, df_familias
+        return df
     except Exception as e:
-        st.error(f"Erro ao processar planilha: {e}")
-        return None, None
+        st.error(f"Erro ao carregar dados: {e}")
+        return None
 
-df_geral, df_familias = load_and_clean_data()
+df_base = load_and_clean_data()
 
-if df_geral is not None:
+if df_base is not None:
+    # DEFINIÇÃO DE COLUNAS CHAVE
     COL_RESP = "NOME DO RESPONSÁVEL"
     COL_PART = "NOME DO PARTICIPANTE (ATIVIDADES)"
     
-    # Indicadores Socioeconômicos (22 colunas)
+    # Índices dos 22 indicadores socioeconômicos para os gráficos
     idx_graficos = [1, 2, 4, 6, 7, 9, 10, 11, 13, 17, 18, 19, 20, 21, 23, 24, 27, 28, 29, 31, 33, 37]
 
-    # --- 4. CONTADORES ---
-    total_familias = len(df_familias) # Crava nos 292
-    total_participantes = len(df_geral[df_geral[COL_PART] != "NÃO INFORMADO"])
+    # --- 4. CÁLCULO DOS INDICADORES (LÓGICA REVISADA) ---
+    # Famílias: Consideramos cada linha que possui um responsável preenchido (Total 292)
+    df_familias = df_base[df_base[COL_RESP] != "NÃO INFORMADO"].copy()
+    total_familias = len(df_familias) 
 
-    st.markdown('<div class="main-header"><h1>Painel Social CAS 2026</h1><p>Análise Baseada em 292 Unidades Familiares Únicas</p></div>', unsafe_allow_html=True)
+    # Participantes: Todos os registros da planilha (Total 381)
+    total_participantes = len(df_base)
+
+    st.markdown('<div class="main-header"><h1>Painel CAS 2026 | Gestão Social</h1><p>Diagnóstico de Unidades Familiares e Fluxo de Atividades</p></div>', unsafe_allow_html=True)
     
     k1, k2, k3 = st.columns(3)
     with k1:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">🏠 Famílias Únicas</div><div class="kpi-value">{total_familias}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">🏠 Total de Famílias</div><div class="kpi-value">{total_familias}</div></div>', unsafe_allow_html=True)
     with k2:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Participantes Totais</div><div class="kpi-value">{total_participantes}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Participantes Ativos</div><div class="kpi-value">{total_participantes}</div></div>', unsafe_allow_html=True)
     with k3:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📋 Lista de Exportação</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📊 Média Membros/Família</div><div class="kpi-value">{round(total_participantes/total_familias, 1) if total_familias > 0 else 0}</div></div>', unsafe_allow_html=True)
 
-    # --- 5. FILTROS (Atuam na base de famílias) ---
+    # --- 5. FILTROS E PESQUISA ---
     st.write("---")
     f1, f2, f3 = st.columns([1, 1, 2])
     
     with f1:
         col_renda = "RENDA FAMILIAR TOTAL"
-        op_renda = sorted(df_familias[col_renda].unique())
-        sel_renda = st.multiselect("Renda Familiar:", op_renda, default=op_renda)
+        op_renda = sorted([str(x) for x in df_familias[col_renda].unique()])
+        sel_renda = st.multiselect("Filtrar por Renda:", op_renda, default=op_renda)
     
     with f2:
-        col_trab = "EXERCE ATIVIDADE REMUNERADA:"
-        op_trab = sorted(df_familias[col_trab].unique())
-        sel_trab = st.multiselect("Trabalho:", op_trab, default=op_trab)
+        col_moradia = "SITUAÇÃO DE MORADIA"
+        op_moradia = sorted([str(x) for x in df_familias[col_moradia].unique()])
+        sel_moradia = st.multiselect("Filtrar por Moradia:", op_moradia, default=op_moradia)
 
-    # Aplicação do filtro na base de famílias para os gráficos
-    df_f_filtrado = df_familias[(df_familias[col_renda].isin(sel_renda)) & (df_familias[col_trab].isin(sel_trab))]
+    # Aplicação do Filtro nas Famílias
+    df_filtrado = df_familias[(df_familias[col_renda].isin(sel_renda)) & (df_familias[col_moradia].isin(sel_moradia))]
 
     with f3:
-        # Correção do erro TypeError: Tratamento de lista vazia
-        opcoes_busca = sorted([n for n in df_f_filtrado[COL_RESP].unique() if n != "NÃO INFORMADO"])
-        selecionado = st.selectbox("🔍 Localizar Família pelo Responsável:", ["SELECIONE..."] + opcoes_busca)
+        # Correção do TypeError: Convertendo para string e removendo nulos antes de ordenar
+        lista_nomes = [str(n) for n in df_filtrado[COL_RESP].unique() if n != "NÃO INFORMADO"]
+        opcoes_busca = sorted(lista_nomes)
+        selecionado = st.selectbox("🔍 Pesquisar Família (Responsável):", ["SELECIONE..."] + opcoes_busca)
 
-    # --- 6. GRÁFICOS SOCIAIS (BASE: FAMÍLIAS ÚNICAS) ---
+    # --- 6. FICHA TÉCNICA E MEMBROS ---
+    if selecionado != "SELECIONE...":
+        st.write("---")
+        # Busca TODOS os participantes vinculados a este responsável na base completa
+        df_membros = df_base[df_base[COL_RESP] == selecionado]
+        dados_principais = df_membros.iloc[0]
+        
+        c_tit, c_btn = st.columns([3, 1])
+        c_tit.subheader(f"📄 Prontuário Familiar: {selecionado}")
+        
+        if c_btn.button("➕ Adicionar à Exportação"):
+            if selecionado not in st.session_state.lista_exportacao:
+                st.session_state.lista_exportacao.append(selecionado)
+                st.rerun()
+
+        with st.expander("👁️ Detalhes da Família e Participantes", expanded=True):
+            st.info(f"Esta família possui {len(df_membros)} participante(s) registrado(s).")
+            st.table(df_membros[[COL_PART, "ATIVIDADE DESEJADA", "TURNO", "IDADE (PARTICIPANTE)"]])
+            st.json(dados_principais.to_dict())
+
+    # --- 7. GRÁFICOS ANALÍTICOS (CORES ESCURAS/SÓBRIAS) ---
     st.write("---")
-    st.subheader("📊 Diagnóstico Socioassistencial (1 dado por Família)")
-
-    
+    st.subheader("📊 Diagnóstico dos 22 Indicadores Sociais")
+    st.markdown("> Baseado no perfil das famílias selecionadas.")
 
     lay_g = st.columns(2)
-    colunas_vis = [df_geral.columns[i] for i in idx_graficos if i < len(df_geral.columns)]
+    colunas_visuais = [df_base.columns[i] for i in idx_graficos if i < len(df_base.columns)]
 
-    for idx, col_nome in enumerate(colunas_vis):
+    for idx, col_nome in enumerate(colunas_visuais):
         with lay_g[idx % 2]:
-            contagem = df_f_filtrado[col_nome].value_counts().reset_index()
+            contagem = df_filtrado[col_nome].value_counts().reset_index()
             contagem.columns = [col_nome, 'CONT']
             contagem = contagem.sort_values(by='CONT', ascending=True)
 
+            # Paleta Sunsetdark para cores mais escuras e legíveis
             fig = px.bar(
                 contagem, y=col_nome, x='CONT', orientation='h',
-                title=f"FAMÍLIAS POR: {col_nome}",
+                title=f"INDICADOR: {col_nome}",
                 color='CONT', color_continuous_scale='Sunsetdark', text='CONT'
             )
             fig.update_layout(
@@ -125,25 +149,13 @@ if df_geral is not None:
             fig.update_traces(textposition='outside', marker_line_color='rgb(15,23,42)', marker_line_width=1)
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- 7. DETALHAMENTO DOS FILHOS/PARTICIPANTES ---
-    if selecionado != "SELECIONE...":
-        st.write("---")
-        # Busca na base geral todos os membros vinculados àquele responsável
-        membros = df_geral[df_geral[COL_RESP] == selecionado]
-        st.subheader(f"👨‍👩‍👧‍👦 Membros da Família de {selecionado}")
-        st.table(membros[[COL_PART, "ATIVIDADE DESEJADA", "TURNO", "IDADE (PARTICIPANTE)"]])
-        
-        if st.button("➕ Adicionar Família à Exportação"):
-            if selecionado not in st.session_state.lista_exportacao:
-                st.session_state.lista_exportacao.append(selecionado)
-                st.rerun()
-
+    # --- 8. EXPORTAÇÃO ---
     if st.session_state.lista_exportacao:
         st.sidebar.markdown("---")
-        df_exp = df_geral[df_geral[COL_RESP].isin(st.session_state.lista_exportacao)]
+        df_exp = df_base[df_base[COL_RESP].isin(st.session_state.lista_exportacao)]
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
             df_exp.to_excel(writer, index=False)
-        st.sidebar.download_button("🚀 Baixar Excel Selecionado", buf.getvalue(), "Relatorio_CAS_2026.xlsx", use_container_width=True)
+        st.sidebar.download_button("🚀 Baixar Relatório das Selecionadas", buf.getvalue(), "Relatorio_CAS_Unificado.xlsx", use_container_width=True)
 else:
-    st.error("Planilha 'Planilha Matriculados' não encontrada no repositório.")
+    st.error("Por favor, verifique se o arquivo 'Planilha Matriculados' está na mesma pasta do script.")
