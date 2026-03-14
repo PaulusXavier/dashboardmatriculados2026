@@ -5,12 +5,12 @@ import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="CAS 2026 | Gestão Social", layout="wide", page_icon="📊")
+st.set_page_config(page_title="CAS 2026 | Inteligência Familiar", layout="wide", page_icon="📊")
 
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
 
-# --- 2. CSS PARA DESIGN SÓBRIO E IMPACTANTE ---
+# --- 2. CSS PROFISSIONAL (TONS ESCUROS) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
@@ -28,7 +28,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO COM LIMPEZA DE LINHAS FANTASMA ---
+# --- 3. CARREGAMENTO E FILTRAGEM DE FAMÍLIAS ---
 @st.cache_data
 def load_and_clean_data():
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
@@ -38,82 +38,82 @@ def load_and_clean_data():
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
         df.columns = [str(c).strip().upper() for c in df.columns]
         
-        # FILTRO MESTRE: Mantém apenas onde o Responsável está preenchido (Garante os 292)
-        df = df[df["NOME DO RESPONSÁVEL"].notna()]
-        df = df[df["NOME DO RESPONSÁVEL"].str.strip() != ""]
-        
-        # Limpeza de strings para unificação de categorias
+        # Limpeza básica
         for col in df.columns:
             df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip().str.upper()
             df[col] = df[col].replace(['NAN', 'NONE', ''], 'NÃO INFORMADO')
-        return df
+        
+        # Base de Famílias (Apenas nomes únicos de responsáveis para os gráficos sociais)
+        # Isso garante que 1 família = 1 dado no gráfico
+        df_familias = df[df["NOME DO RESPONSÁVEL"] != "NÃO INFORMADO"].drop_duplicates(subset=["NOME DO RESPONSÁVEL"])
+        
+        return df, df_familias
     except Exception as e:
-        st.error(f"Erro na leitura dos dados: {e}")
-        return None
+        st.error(f"Erro: {e}")
+        return None, None
 
-df_base = load_and_clean_data()
+df_geral, df_familias = load_and_clean_data()
 
-if df_base is not None:
+if df_geral is not None:
     COL_RESP = "NOME DO RESPONSÁVEL"
     COL_PART = "NOME DO PARTICIPANTE (ATIVIDADES)"
     
-    # Índices revisados dos 22 indicadores para os gráficos
+    # Índices dos 22 indicadores socioeconômicos
     idx_graficos = [1, 2, 4, 6, 7, 9, 10, 11, 13, 17, 18, 19, 20, 21, 23, 24, 27, 28, 29, 31, 33, 37]
 
-    # --- 4. CONTADORES REVISADOS ---
-    total_familias = len(df_base) # Travado nos 292 após a limpeza
-    total_participantes = len(df_base[df_base[COL_PART] != "NÃO INFORMADO"])
+    # --- 4. KPIs ---
+    total_familias = len(df_familias) # Deve cravar em 292
+    total_participantes = len(df_geral[df_geral[COL_PART] != "NÃO INFORMADO"])
 
-    st.markdown('<div class="main-header"><h1>Painel de Gestão CAS 2026</h1><p>Diagnóstico Unificado das Unidades Familiares Atendidas</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header"><h1>Painel de Diagnóstico Social CAS</h1><p>Análise Baseada em Unidades Familiares Únicas</p></div>', unsafe_allow_html=True)
     
     k1, k2, k3 = st.columns(3)
     with k1:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">🏠 Famílias Cadastradas</div><div class="kpi-value">{total_familias}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">🏠 Famílias (Responsáveis Únicos)</div><div class="kpi-value">{total_familias}</div></div>', unsafe_allow_html=True)
     with k2:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Total de Participantes</div><div class="kpi-value">{total_participantes}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Participantes Totais</div><div class="kpi-value">{total_participantes}</div></div>', unsafe_allow_html=True)
     with k3:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📋 Lista de Exportação</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📋 Lista para Exportação</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
 
-    # --- 5. FILTROS E PESQUISA ---
+    # --- 5. FILTROS (ATUANDO SOBRE AS FAMÍLIAS) ---
     st.write("---")
     f1, f2, f3 = st.columns([1, 1, 2])
     
     with f1:
         col_renda = "RENDA FAMILIAR TOTAL"
-        op_renda = sorted(df_base[col_renda].unique())
-        sel_renda = st.multiselect("Filtrar Renda:", op_renda, default=op_renda)
+        op_renda = sorted(df_familias[col_renda].unique())
+        sel_renda = st.multiselect("Renda Familiar:", op_renda, default=op_renda)
     
     with f2:
-        col_moradia = "SITUAÇÃO DE MORADIA"
-        op_moradia = sorted(df_base[col_moradia].unique())
-        sel_moradia = st.multiselect("Filtrar Moradia:", op_moradia, default=op_moradia)
+        col_benef = "A FAMÍLIA RECEBE ALGUM TIPO DE BENEFÍCIO"
+        op_benef = sorted(df_familias[col_benef].unique())
+        sel_benef = st.multiselect("Recebe Benefício:", op_benef, default=op_benef)
 
-    # Base filtrada para os gráficos
-    df_filtrado = df_base[(df_base[col_renda].isin(sel_renda)) & (df_base[col_moradia].isin(sel_moradia))]
+    # Base filtrada para os gráficos (Censo Familiar)
+    df_f_filtrado = df_familias[(df_familias[col_renda].isin(sel_renda)) & (df_familias[col_benef].isin(sel_benef))]
 
     with f3:
-        lista_busca = sorted(df_filtrado[COL_RESP].unique())
-        selecionado = st.selectbox("🔍 Localizar Família (Pelo Responsável):", ["SELECIONE..."] + lista_busca)
+        lista_busca = sorted(df_f_filtrado[COL_RESP].unique())
+        selecionado = st.selectbox("🔍 Detalhar Família pelo Responsável:", ["SELECIONE..."] + lista_busca)
 
-    # --- 6. GRÁFICOS ANALÍTICOS (PALETA ESCURA SUNSETDARK) ---
+    # --- 6. GRÁFICOS SOCIAIS (CENSO DE FAMÍLIAS - CORES ESCURAS) ---
     st.write("---")
-    st.subheader("📊 Diagnóstico Social dos Indicadores")
-    st.info("Nota: Os gráficos refletem o perfil socioeconômico de cada matrícula identificada.")
+    st.subheader("📊 Diagnóstico Social (Base: 1 Gráfico por Família)")
 
     
 
     lay_g = st.columns(2)
-    colunas_vis = [df_base.columns[i] for i in idx_graficos if i < len(df_base.columns)]
+    colunas_vis = [df_geral.columns[i] for i in idx_graficos if i < len(df_geral.columns)]
 
     for idx, col_nome in enumerate(colunas_vis):
         with lay_g[idx % 2]:
-            contagem = df_filtrado[col_nome].value_counts().reset_index()
+            contagem = df_f_filtrado[col_nome].value_counts().reset_index()
             contagem.columns = [col_nome, 'CONT']
             contagem = contagem.sort_values(by='CONT', ascending=True)
 
             fig = px.bar(
                 contagem, y=col_nome, x='CONT', orientation='h',
-                title=f"INDICADOR: {col_nome}",
+                title=f"FAMÍLIAS POR: {col_nome}",
                 color='CONT', color_continuous_scale='Sunsetdark', text='CONT'
             )
             fig.update_layout(
@@ -124,13 +124,25 @@ if df_base is not None:
             fig.update_traces(textposition='outside', marker_line_color='rgb(15,23,42)', marker_line_width=1)
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- 7. EXPORTAÇÃO ---
+    # --- 7. DETALHAMENTO E EXPORTAÇÃO ---
+    if selecionado != "SELECIONE...":
+        st.write("---")
+        # Aqui buscamos na base GERAL todos os participantes daquela família
+        membros = df_geral[df_geral[COL_RESP] == selecionado]
+        st.subheader(f"👨‍👩‍👧‍👦 Composição da Família: {selecionado}")
+        st.table(membros[[COL_PART, "ATIVIDADE DESEJADA", "TURNO", "IDADE (PARTICIPANTE)"]])
+        
+        if st.button("➕ Adicionar Família à Lista de Exportação"):
+            if selecionado not in st.session_state.lista_exportacao:
+                st.session_state.lista_exportacao.append(selecionado)
+                st.rerun()
+
     if st.session_state.lista_exportacao:
         st.sidebar.markdown("---")
-        df_exp = df_base[df_base[COL_RESP].isin(st.session_state.lista_exportacao)]
+        df_exp = df_geral[df_geral[COL_RESP].isin(st.session_state.lista_exportacao)]
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
             df_exp.to_excel(writer, index=False)
-        st.sidebar.download_button("🚀 Baixar Prontuários (Excel)", buf.getvalue(), "Relatorio_CAS_2026.xlsx", use_container_width=True)
+        st.sidebar.download_button("🚀 Baixar Excel das Famílias Selecionadas", buf.getvalue(), "Relatorio_CAS_2026.xlsx", use_container_width=True)
 else:
-    st.error("Erro: Certifique-se de que o arquivo 'Planilha Matriculados' está no repositório.")
+    st.error("Planilha não encontrada.")
