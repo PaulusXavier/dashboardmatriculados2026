@@ -76,7 +76,7 @@ if df_geral is not None:
         (df_unicos[col_benef].isin(f_benef))
     ].copy()
 
-    # Ordenação por Vulnerabilidade
+    # Ordenação por Vulnerabilidade (Não trabalha + Sem benefício = Topo)
     df_filtrado['VULN'] = df_filtrado.apply(lambda r: 0 if "NÃO" in r[col_trab] and "NÃO" in r[col_benef] else 1, axis=1)
     df_filtrado = df_filtrado.sort_values('VULN')
 
