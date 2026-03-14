@@ -78,7 +78,7 @@ if df_geral is not None:
     # Participantes vinculados
     total_pessoas = len(df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(df_filtrado_fam["NOME DO RESPONSÁVEL"])])
 
-    # --- 5. DASHBOARD PRINCIPAL (INVERTIDO) ---
+    # --- 5. DASHBOARD PRINCIPAL ---
     st.markdown('<div class="main-header"><h1>Painel Socioeconômico CAS</h1></div>', unsafe_allow_html=True)
     
     m1, m2 = st.columns(2)
@@ -106,7 +106,6 @@ if df_geral is not None:
 
         st.subheader(f"🏠 Ficha Social: {selecionado}")
         
-        # Informações Cadastrais em Grid
         grid = st.columns(4)
         for i, col in enumerate(df_geral.columns):
             with grid[i % 4]:
@@ -120,6 +119,11 @@ if df_geral is not None:
         st.table(familia_rows[["NOME DO PARTICIPANTE (ATIVIDADES)", "ATIVIDADE DESEJADA", "TURNO", "IDADE (PARTICIPANTE)"]])
 
     # --- 7. EXPORTAÇÃO ---
+    if st.sidebar.button("➕ Adicionar à Exportação"):
+        if selecionado != "-- SELECIONE UM NOME --":
+            st.session_state.lista_exportacao.append(selecionado)
+            st.rerun()
+
     if st.session_state.lista_exportacao:
         st.sidebar.write("---")
         if st.sidebar.button("📥 Baixar Excel Selecionados"):
