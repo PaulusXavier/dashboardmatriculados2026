@@ -5,14 +5,15 @@ import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Gestão CAS/SETRABES", layout="wide")
+st.set_page_config(page_title="Sociodemográfico - CAS/SETRABES", layout="wide")
 
 st.markdown("""
     <style>
-    .card-vulnerabilidade { padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #e2e8f0; background-color: #f8fafc; }
-    .status-alerta { border-left: 10px solid #be123c; }
-    .titulo-principal { color: #1e3a8a; text-align: center; font-weight: bold; margin-bottom: 5px; }
-    .subtitulo { text-align: center; color: #64748b; margin-bottom: 30px; }
+    .card-painel { padding: 20px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #e2e8f0; }
+    .bg-local { background-color: #f0f9ff; border-left: 8px solid #0ea5e9; }
+    .bg-eco { background-color: #f0fdf4; border-left: 8px solid #16a34a; }
+    .bg-alerta { background-color: #fef2f2; border-left: 8px solid #dc2626; }
+    .titulo-sessao { color: #1e3a8a; font-weight: bold; margin-top: 20px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -21,121 +22,122 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CAMINHO = os.path.join(BASE_DIR, "Planilha Matriculados.xlsx")
 
 @st.cache_data
-def carregar_dados_sociais(caminho):
+def carregar_dados(caminho):
     if not os.path.exists(caminho): return None
-    try:
-        df = pd.read_excel(caminho, dtype=str)
-        df.columns = [str(c).strip().replace('\n', ' ') for c in df.columns]
-        return df
-    except Exception: return None
+    df = pd.read_excel(caminho, dtype=str)
+    df.columns = [str(c).strip().replace('\n', ' ') for c in df.columns]
+    return df
 
-df = carregar_dados_sociais(CAMINHO)
+df = carregar_dados(CAMINHO)
 
 if df is not None:
-    # Mapeamento de Colunas Críticas
+    # Mapeamento de Colunas
     col_resp = "NOME DO RESPONSÁVEL:"
     col_renda = "RENDA FAMILIAR MENSAL TOTAL:"
-    col_genero = "GÊNERO:"
-    col_benef_status = "A FAMÍLIA É BENEFICIÁRIA DE ALGUM PROGRAMA SOCIAL GOVERNAMENTAL:"
-    col_benef_qual = "QUAL PROGRAMA SOCIAL:"
+    col_trampo = "EXERCE ATIVIDADE REMUNERADA:"
     col_moradia = "SITUAÇÃO DA MORADIA:"
-    
-    st.markdown("<h1 class='titulo-principal'>Sociodemográfico das Famílias Matriculadas</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='subtitulo'>Painel Técnico de Monitoramento e Triagem Social</p>", unsafe_allow_html=True)
+    col_benef = "A FAMÍLIA É BENEFICIÁRIA DE ALGUM PROGRAMA SOCIAL GOVERNAMENTAL:"
 
-    # --- SEÇÃO DE EXPORTAÇÃO (SIDEBAR) ---
-    st.sidebar.header("📤 Exportação de Dados")
-    df_unicos = df.drop_duplicates(subset=[col_resp])
-    
-    selecionados_export = st.sidebar.multiselect(
-        "Selecionar famílias para exportar:", 
-        options=df_unicos[col_resp].unique().tolist()
-    )
+    # Ranking de Renda (Morettin & Bussab)
+    rank_map = {"SEM RENDA": 0, "ATÉ R$ 405,26": 1, "DE R$ 405,26 A R$ 810,50": 2, "DE R$ 810,50 A R$ 1.215,76": 3}
 
-    if selecionados_export:
-        df_para_baixar = df[df[col_resp].isin(selecionados_export)]
-        
+    # --- BARRA LATERAL (FILTROS) ---
+    st.sidebar.header("🔍 Filtros de Vulnerabilidade")
+    
+    # 1. Filtro de Renda
+    opcoes_renda = ["Todos"] + list(rank_map.keys())
+    filtro_renda = st.sidebar.selectbox("Critério de Renda:", opcoes_renda)
+    
+    # 2. Filtro de Emprego
+    opcoes_trampo = ["Todos"] + (df[col_trampo].unique().tolist() if col_trampo in df.columns else [])
+    filtro_trampo = st.sidebar.selectbox("Está Empregado?", opcoes_trampo)
+
+    # Aplicação dos filtros
+    df_filtrado = df.copy()
+    if filtro_renda != "Todos":
+        df_filtrado = df_filtrado[df_filtrado[col_renda] == filtro_renda]
+    if filtro_trampo != "Todos":
+        df_filtrado = df_filtrado[df_filtrado[col_trampo] == filtro_trampo]
+
+    # Ordenação da lista de responsáveis (Vulneráveis primeiro)
+    df_lista = df_filtrado[[col_resp, col_renda]].drop_duplicates(subset=[col_resp])
+    df_lista['rank'] = df_lista[col_renda].map(lambda x: rank_map.get(str(x).upper(), 99))
+    lista_final = df_lista.sort_values(by=['rank', col_resp])[col_resp].tolist()
+
+    # Seletor de Responsável na Barra Lateral
+    selecionado = st.sidebar.selectbox("👤 Responsável Familiar:", ["Selecione..."] + lista_final)
+
+    # Exportação na Sidebar
+    st.sidebar.divider()
+    st.sidebar.write("### 📤 Exportar")
+    if selecionado != "Selecione...":
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_para_baixar.to_excel(writer, index=False, sheet_name='Relatorio_CAS')
-        
-        st.sidebar.download_button(
-            label="📥 Baixar Excel Selecionado",
-            data=output.getvalue(),
-            file_name="relatorio_familias_matriculadas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        st.sidebar.success(f"{len(selecionados_export)} núcleos prontos.")
+            df[df[col_resp] == selecionado].to_excel(writer, index=False)
+        st.sidebar.download_button("Baixar Dados desta Família", output.getvalue(), f"{selecionado}.xlsx")
 
-    # --- CONSULTA INDIVIDUAL ---
-    st.write("### 🔍 Consulta por Responsável Familiar")
-    nome_selecionado = st.selectbox("Pesquisar nome:", ["Selecione um nome..."] + df_unicos[col_resp].tolist())
+    # --- PAINEL PRINCIPAL ---
+    st.markdown("<h1 style='text-align:center;'>Sociodemográfico das Famílias Matriculadas</h1>", unsafe_allow_html=True)
     
-    if nome_selecionado != "Selecione um nome...":
-        dados_f = df[df[col_resp] == nome_selecionado]
-        st.markdown(f'''<div class="card-vulnerabilidade status-alerta">
-            <b>Responsável:</b> {nome_selecionado} | 
-            <b>Renda Familiar:</b> {dados_f[col_renda].iloc[0]} | 
-            <b>Moradia:</b> {dados_f[col_moradia].iloc[0] if col_moradia in df.columns else "N/A"}
-        </div>''', unsafe_allow_html=True)
+    if selecionado != "Selecione...":
+        dados_f = df[df[col_resp] == selecionado]
         
-        with st.expander("👁️ Ver Ficha Técnica Completa (Todas as 56 Colunas)"):
+        # Destaque de Risco
+        renda_val = dados_f[col_renda].iloc[0]
+        if rank_map.get(str(renda_val).upper(), 99) <= 1:
+            st.markdown(f'<div class="alerta-prioridade" style="background-color:#be123c; color:white; padding:10px; border-radius:10px; text-align:center; font-weight:bold;">🚨 ATENÇÃO: ALTA VULNERABILIDADE SOCIOECONÔMICA</div>', unsafe_allow_html=True)
+
+        # Cards de Informação
+        st.write("###")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f'''<div class="card-painel bg-local">
+                <h3>🏠 Localização</h3>
+                <p><b>Endereço:</b> {dados_f['ENDEREÇO COMPLETO:'].iloc[0]}</p>
+                <p><b>Bairro:</b> {dados_f['BAIRRO:'].iloc[0]}</p>
+            </div>''', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'''<div class="card-painel bg-eco">
+                <h3>💰 Dados Econômicos</h3>
+                <p><b>Renda:</b> {renda_val}</p>
+                <p><b>Empregado:</b> {dados_f[col_trampo].iloc[0] if col_trampo in dados_f.columns else "N/A"}</p>
+                <p><b>Programa Social:</b> {dados_f[col_benef].iloc[0] if col_benef in dados_f.columns else "N/A"}</p>
+            </div>''', unsafe_allow_html=True)
+
+        # Tabela de Composição
+        st.write("#### 👥 Composição do Grupo Familiar")
+        st.dataframe(dados_f[['NOME:', 'IDADE:', 'GÊNERO:', 'GRAU DE PARENTESCO:']], use_container_width=True, hide_index=True)
+
+        # TABELA COMPLETA (Puxar tudo)
+        with st.expander("🔍 ACESSAR FICHA TÉCNICA COMPLETA (Todas as 56 Colunas)"):
+            st.write("Abaixo estão todos os dados brutos cadastrados para esta família:")
             st.dataframe(dados_f)
 
-    # --- GRÁFICOS DE DADOS SENSÍVEIS (QUANTITATIVOS) ---
+    # --- GRÁFICOS (COMPLEMENTO NO FINAL) ---
     st.divider()
-    st.write("### 📊 Quantitativos Socioeconómicos (Gestão)")
+    st.markdown("<h2 class='titulo-sessao'>📊 Complemento: Análise Estatística Geral</h2>", unsafe_allow_html=True)
+    
+    g1, g2 = st.columns(2)
+    with g1:
+        # Gráfico de Gênero
+        df_gen = df.drop_duplicates(subset=[col_resp])
+        fig1 = px.bar(df_gen['GÊNERO:'].value_counts().reset_index(), x='GÊNERO:', y='count', text='count', title="Gênero dos Responsáveis", color_discrete_sequence=['#3b82f6'])
+        st.plotly_chart(fig1, use_container_width=True)
+    with g2:
+        # Gráfico de Renda
+        fig2 = px.bar(df[col_renda].value_counts().reset_index(), x=col_renda, y='count', text='count', title="Distribuição de Renda", color_discrete_sequence=['#ef4444'])
+        st.plotly_chart(fig2, use_container_width=True)
 
-    # Linha 1: Gênero e Renda
-    c1, c2 = st.columns(2)
-    with c1:
-        # Quantidade de Gênero (Apenas dos Responsáveis)
-        fig_gen = px.bar(df_unicos[col_genero].value_counts().reset_index(), 
-                         x=col_genero, y='count', text='count', 
-                         title="Distribuição de Gênero (Chefes de Família)",
-                         color_discrete_sequence=['#2563eb'])
-        fig_gen.update_traces(textposition='outside')
-        st.plotly_chart(fig_gen, use_container_width=True)
-
-    with c2:
-        # Quantidade por Renda
-        fig_ren = px.bar(df[col_renda].value_counts().reset_index(), 
-                         x=col_renda, y='count', text='count',
-                         title="Quantitativo por Faixa de Renda",
-                         color_discrete_sequence=['#dc2626'])
-        fig_ren.update_traces(textposition='outside')
-        st.plotly_chart(fig_ren, use_container_width=True)
-
-    # Linha 2: Benefícios e Moradia
-    c3, c4 = st.columns(2)
-    with c3:
-        # Benefícios Sociais
-        fig_ben = px.bar(df[col_benef_status].value_counts().reset_index(), 
-                         x=col_benef_status, y='count', text='count',
-                         title="Famílias em Programas Sociais (Sim/Não)",
-                         color_discrete_sequence=['#16a34a'])
-        fig_ben.update_traces(textposition='outside')
-        st.plotly_chart(fig_ben, use_container_width=True)
-
-    with c4:
-        # Moradia
+    g3, g4 = st.columns(2)
+    with g3:
+        # Gráfico de Benefícios
+        fig3 = px.bar(df[col_benef].value_counts().reset_index(), x=col_benef, y='count', text='count', title="Recebe Benefício?", color_discrete_sequence=['#10b981'])
+        st.plotly_chart(fig3, use_container_width=True)
+    with g4:
+        # Gráfico de Moradia
         if col_moradia in df.columns:
-            fig_mor = px.bar(df[col_moradia].value_counts().reset_index(), 
-                             x=col_moradia, y='count', text='count',
-                             title="Situação de Moradia (Propriedade/Aluguel)",
-                             color_discrete_sequence=['#7c3aed'])
-            fig_mor.update_traces(textposition='outside')
-            st.plotly_chart(fig_mor, use_container_width=True)
-
-    # Gráfico de Tipos de Benefícios (Se a coluna existir)
-    if col_benef_qual in df.columns:
-        st.write("#### Detalhamento de Programas Sociais Ativos")
-        # Filtrar apenas quem recebe e remover nulos
-        df_q = df[df[col_benef_qual].notna()]
-        fig_q = px.bar(df_q[col_benef_qual].value_counts().reset_index(), 
-                       x='count', y=col_benef_qual, orientation='h', 
-                       text='count', title="Quantitativo por Tipo de Benefício")
-        st.plotly_chart(fig_q, use_container_width=True)
+            fig4 = px.bar(df[col_moradia].value_counts().reset_index(), x=col_moradia, y='count', text='count', title="Tipo de Moradia", color_discrete_sequence=['#8b5cf6'])
+            st.plotly_chart(fig4, use_container_width=True)
 
 else:
-    st.error("Erro: Arquivo 'Planilha Matriculados.xlsx' não encontrado.")
+    st.error("Planilha 'Planilha Matriculados.xlsx' não encontrada.")
