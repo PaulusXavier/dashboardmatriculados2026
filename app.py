@@ -1,35 +1,34 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="CAS | Inteligência Social", layout="wide", page_icon="🧠")
+st.set_page_config(page_title="CAS | Diagnóstico de Vulnerabilidade", layout="wide", page_icon="📋")
 
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
 
-# --- 2. CSS PARA DESIGN PREMIUM ---
+# --- 2. CSS PARA DESIGN SÓBRIO E PROFISSIONAL ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
     html, body, [class*="css"] { font-family: 'Sora', sans-serif; background-color: #f8fafc; }
     .main-header {
-        background: linear-gradient(135deg, #020617 0%, #1e3a8a 100%);
-        padding: 35px; border-radius: 20px; color: white; text-align: center; margin-bottom: 25px;
+        background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+        padding: 30px; border-radius: 15px; color: white; text-align: center; margin-bottom: 25px;
     }
-    .kpi-card {
-        background: white; padding: 20px; border-radius: 15px; border-top: 5px solid #1e3a8a;
-        text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    .kpi-box {
+        background: white; padding: 20px; border-radius: 12px; border-top: 5px solid #1e40af;
+        text-align: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
     }
-    .data-card { background: white; padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 8px; }
-    .label-card { color: #64748b; font-size: 0.65rem; font-weight: 800; text-transform: uppercase; }
-    .value-card { color: #0f172a; font-size: 0.8rem; font-weight: 700; }
+    .kpi-title { color: #64748b; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; }
+    .kpi-value { color: #1e293b; font-size: 2.5rem; font-weight: 800; }
+    .status-vulneravel { background-color: #fee2e2; color: #991b1b; padding: 5px 10px; border-radius: 5px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO E NORMALIZAÇÃO ---
+# --- 3. CARREGAMENTO E LÓGICA DE FAMÍLIAS (292) ---
 @st.cache_data
 def load_data():
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
@@ -37,138 +36,112 @@ def load_data():
     path = arquivos[0]
     try:
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
-        df.columns = [str(c).strip().replace('\n', ' ').upper() for c in df.columns]
+        df.columns = [str(c).strip().upper() for c in df.columns]
         
-        # Limpeza rigorosa para evitar duplicados por erro de digitação
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
+            df[col] = df[col].replace(['NAN', 'NONE', ''], 'NÃO INFORMADO')
         
-        df = df.replace(["NAN", "NONE", ""], "NÃO INFORMADO")
+        # Filtro: Apenas linhas com responsável preenchido (As 292 famílias)
+        df_familias = df[df["NOME DO RESPONSÁVEL"] != "NÃO INFORMADO"].copy()
+        # Remove duplicados para ter 1 linha por família na triagem
+        df_unicos = df_familias.drop_duplicates(subset=["NOME DO RESPONSÁVEL"])
         
-        # Filtro de segurança: remove linhas onde nem responsável nem participante existem
-        df = df[~((df["NOME DO RESPONSÁVEL"] == "NÃO INFORMADO") & (df["NOME DO PARTICIPANTE (ATIVIDADES)"] == "NÃO INFORMADO"))]
-        
-        return df
+        return df, df_unicos
     except Exception as e:
-        st.error(f"Erro Crítico: {e}")
-        return None
+        st.error(f"Erro ao carregar: {e}")
+        return None, None
 
-df_base = load_data()
+df_geral, df_unicos = load_data()
 
-if df_base is not None:
-    # Definição de Colunas Mestras
-    COL_RESPONSAVEL = "NOME DO RESPONSÁVEL"
-    COL_TRAMPO = "EXERCE ATIVIDADE REMUNERADA:"
-    COL_RENDA = "RENDA FAMILIAR TOTAL"
-    
-    # Criamos uma base ÚNICA por família para análise socioeconômica real
-    # Isso impede que uma família com 4 filhos conte como 4 rendas nos gráficos
-    df_familias_unicas = df_base.drop_duplicates(subset=[COL_RESPONSAVEL])
-    df_familias_unicas = df_familias_unicas[df_familias_unicas[COL_RESPONSAVEL] != "NÃO INFORMADO"]
+if df_geral is not None:
+    COL_RESP = "NOME DO RESPONSÁVEL"
+    COL_PART = "NOME DO PARTICIPANTE (ATIVIDADES)"
+    COL_TRAB = "EXERCE ATIVIDADE REMUNERADA:"
 
-    # --- 4. KPIs NO TOPO ---
-    st.markdown('<div class="main-header"><h1>Gestão de Vulnerabilidade Familiar | CAS</h1></div>', unsafe_allow_html=True)
+    # --- 4. KPIs ---
+    st.markdown('<div class="main-header"><h1>Relatório de Vulnerabilidade CAS 2026</h1></div>', unsafe_allow_html=True)
     
     k1, k2, k3 = st.columns(3)
     with k1:
-        st.markdown(f'<div class="kpi-card"><div class="label-card">Famílias (Responsáveis)</div><div style="font-size:2rem; font-weight:800;">{len(df_familias_unicas)}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">🏠 Unidades Familiares</div><div class="kpi-value">{len(df_unicos)}</div></div>', unsafe_allow_html=True)
     with k2:
-        st.markdown(f'<div class="kpi-card"><div class="label-card">Total de Participantes</div><div style="font-size:2rem; font-weight:800;">{len(df_base)}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Participantes Totais</div><div class="kpi-value">{len(df_geral)}</div></div>', unsafe_allow_html=True)
     with k3:
-        st.markdown(f'<div class="kpi-card"><div class="label-card">Lista de Exportação</div><div style="font-size:2rem; font-weight:800;">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📋 Exportar Selecionados</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
 
-    # --- 5. FILTROS ---
+    # --- 5. FILTROS POR TRABALHO E VULNERABILIDADE ---
     st.write("---")
-    c1, c2, c3 = st.columns([1, 1, 2])
+    c1, c2 = st.columns([1, 2])
+    
     with c1:
-        op_trampo = sorted(df_familias_unicas[COL_TRAMPO].unique())
-        f_trampo = st.multiselect("🛠️ Trabalha?", op_trampo, default=op_trampo)
-    with c2:
-        op_renda = sorted(df_familias_unicas[COL_RENDA].unique())
-        f_renda = st.multiselect("💰 Renda Familiar:", op_renda, default=op_renda)
-    
-    # Aplicando filtros na base de famílias
-    df_f_filtrado = df_familias_unicas[df_familias_unicas[COL_TRAMPO].isin(f_trampo) & df_familias_unicas[COL_RENDA].isin(f_renda)]
-    
-    with c3:
-        lista_nomes = sorted(df_f_filtrado[COL_RESPONSAVEL].unique())
-        selecionado = st.selectbox("🎯 Selecionar Responsável Familiar:", ["SELECIONE UM NOME..."] + lista_nomes)
+        op_trab = sorted(df_unicos[COL_TRAB].unique())
+        # Filtro focado em quem "NÃO" trabalha (mais vulneráveis)
+        sel_trab = st.multiselect("Filtrar por Trabalho:", op_trab, default=[x for x in op_trab if "NÃO" in x])
 
-    # --- 6. EXIBIÇÃO E PRONTUÁRIO ---
-    if selecionado != "SELECIONE UM NOME...":
+    # Filtrar e Ordenar: Quem não trabalha aparece primeiro na lista
+    df_filtrado = df_unicos[df_unicos[COL_TRAB].isin(sel_trab)]
+    df_filtrado = df_filtrado.sort_values(by=COL_TRAB, ascending=True)
+
+    with c2:
+        lista_busca = sorted([str(n) for n in df_filtrado[COL_RESP].unique()])
+        selecionado = st.selectbox("🎯 Selecione a Família pelo Responsável:", ["SELECIONE..."] + lista_busca)
+
+    # --- 6. ANÁLISE SOCIOECONÔMICA DETALHADA ---
+    if selecionado != "SELECIONE...":
         st.write("---")
-        # Dados do responsável e lista de filhos/participantes
-        dados_familia = df_base[df_base[COL_RESPONSAVEL] == selecionado]
-        chefe = dados_familia.iloc[0]
+        # Puxa todos os membros daquela família na base geral
+        familia_completa = df_geral[df_geral[COL_RESP] == selecionado]
+        dados_sociais = familia_completa.iloc[0]
+
+        col_text, col_btn = st.columns([3, 1])
         
-        col_info, col_sel = st.columns([3, 1])
-        with col_info:
-            st.subheader(f"👤 {selecionado}")
-            st.caption(f"Esta família possui {len(dados_familia)} participante(s) matriculado(s).")
+        with col_text:
+            st.subheader(f"👤 Responsável: {selecionado}")
+            if "NÃO" in str(dados_sociais[COL_TRAB]):
+                st.markdown('<span class="status-vulneravel">⚠️ ALTA VULNERABILIDADE: SEM RENDA REMUNERADA</span>', unsafe_allow_html=True)
         
-        with col_sel:
+        with col_btn:
             if selecionado not in st.session_state.lista_exportacao:
-                if st.button("➕ Adicionar para Relatório"):
+                if st.button("➕ Adicionar à Exportação"):
                     st.session_state.lista_exportacao.append(selecionado)
                     st.rerun()
             else:
-                st.success("✅ Na Lista")
-                if st.button("❌ Remover"):
+                if st.button("❌ Remover da Lista"):
                     st.session_state.lista_exportacao.remove(selecionado)
                     st.rerun()
 
-        with st.expander("🔍 VER FICHA SOCIOECONÔMICA", expanded=True):
-            # Tabela de participantes daquela família específica
-            st.markdown("**Participantes desta Unidade Familiar:**")
-            st.table(dados_familia[["NOME DO PARTICIPANTE (ATIVIDADES)", "ATIVIDADE DESEJADA", "TURNO"]])
-            
-            st.markdown("---")
-            cols = st.columns(4)
-            # Exibe os 22 indicadores principais na ficha
-            indicadores_ficha = [1, 2, 4, 6, 7, 9, 10, 11, 13, 17, 18, 19, 20, 21, 23, 24, 27, 28, 29, 31, 33, 37]
-            for i, idx in enumerate(indicadores_ficha):
-                if idx < len(df_base.columns):
-                    col_name = df_base.columns[idx]
-                    with cols[i % 4]:
-                        st.markdown(f'''<div class="data-card">
-                            <div class="label-card">{col_name}</div>
-                            <div class="value-card">{chefe[col_name]}</div>
-                        </div>''', unsafe_allow_html=True)
+        # Detalhes Socioeconômicos em colunas
+        st.write("### 📋 Perfil da Família")
+        det1, det2, det3, det4 = st.columns(4)
+        det1.metric("Trabalha?", dados_sociais[COL_TRAB])
+        det2.metric("Renda Familiar", dados_sociais["RENDA FAMILIAR TOTAL"])
+        det3.metric("Moradia", dados_sociais["SITUAÇÃO DE MORADIA"])
+        det4.metric("Benefício Social", dados_sociais["A FAMÍLIA RECEBE ALGUM TIPO DE BENEFÍCIO"])
 
-    # --- 7. GRÁFICOS (BASEADOS EM FAMÍLIAS ÚNICAS) ---
-    st.write("---")
-    st.subheader("📊 Diagnóstico Social (Censo Familiar)")
-    st.caption("Gráficos baseados em unidades familiares únicas para evitar distorção de dados.")
-    
-    
+        # Tabela de Participantes (Filhos/Dependentes)
+        st.write(f"### 👨‍👩‍👧‍👦 Participantes ({len(familia_completa)})")
+        st.dataframe(familia_completa[[COL_PART, "IDADE (PARTICIPANTE)", "ATIVIDADE DESEJADA", "TURNO"]], use_container_width=True)
 
-    g_cols = st.columns(2)
-    indices_graficos = [1, 4, 6, 9, 13, 17, 18, 21, 23, 25, 27, 28] # Seleção dos mais relevantes para não poluir
-
-    for idx, i_graf em enumerate(indices_graficos):
-        if i_graf < len(df_base.columns):
-            col_nome = df_base.columns[i_graf]
-            with g_cols[idx % 2]:
-                # Aqui usamos df_f_filtrado para garantir que a estatística seja por FAMÍLIA
-                dados = df_f_filtrado[col_nome].value_counts().reset_index()
-                dados.columns = [col_nome, 'CONT']
-                
-                fig = px.bar(
-                    dados, y=col_nome, x='CONT', orientation='h',
-                    title=f"{col_nome}",
-                    color='CONT', color_continuous_scale='Sunsetdark', text='CONT'
-                )
-                fig.update_layout(height=300, showlegend=False, coloraxis_showscale=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig, use_container_width=True)
-
-    # --- 8. SIDEBAR EXPORT ---
+    # --- 7. EXPORTAÇÃO NO SIDEBAR ---
     if st.session_state.lista_exportacao:
-        st.sidebar.markdown("---")
-        df_export = df_base[df_base[COL_RESPONSAVEL].isin(st.session_state.lista_exportacao)]
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_export.to_excel(writer, index=False, sheet_name='Triagem_CAS')
-        st.sidebar.download_button("📥 BAIXAR RELATÓRIO", data=output.getvalue(), file_name="Relatorio_CAS.xlsx")
+        st.sidebar.markdown("### 🚀 Exportar Relatório")
+        df_exp = df_geral[df_geral[COL_RESP].isin(st.session_state.lista_exportacao)]
+        
+        buf = BytesIO()
+        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
+            df_exp.to_excel(writer, index=False, sheet_name='Triagem_Social')
+        
+        st.sidebar.download_button(
+            label="📥 BAIXAR EXCEL",
+            data=buf.getvalue(),
+            file_name="Relatorio_Vulnerabilidade_CAS.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        if st.sidebar.button("🗑️ Limpar Tudo"):
+            st.session_state.lista_exportacao = []
+            st.rerun()
 
 else:
-    st.info("Aguardando carregamento da Planilha Matriculados...")
+    st.error("Planilha não encontrada. Verifique o nome do arquivo.")
