@@ -40,26 +40,28 @@ def load_data():
     try:
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
         
+        # Limpar nomes das colunas
         df.columns = [str(c).strip().upper() for c in df.columns]
         
+        # Limpeza de dados: remove espaços e substitui vazios/nan por "-"
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
-            # Substituindo qualquer variação de vazio ou NAN por um traço "-"
             df[col] = df[col].replace(['NAN', 'NONE', '', ' ', 'NULL'], '-')
         
-        # Base de Responsáveis Únicos (Famílias)
+        # Base de Responsáveis Únicos (FAMÍLIAS)
+        # Filtramos para ignorar linhas onde o responsável é apenas um traço
         df_unicos = df[df["NOME DO RESPONSÁVEL"] != "-"].drop_duplicates(subset=["NOME DO RESPONSÁVEL"])
         
         return df, df_unicos
     except Exception as e:
-        st.error(f"Erro ao carregar: {e}")
+        st.error(f"Erro ao carregar os dados: {e}")
         return None, None
 
 df_geral, df_unicos = load_data()
 
 if df_geral is not None:
     # --- 4. FILTROS LATERAIS ---
-    st.sidebar.header("🔍 Critérios de Triagem")
+    st.sidebar.header("🔍 Filtros de Vulnerabilidade")
     
     col_trab = "EXERCE ATIVIDADE REMUNERADA:"
     col_renda = "RENDA FAMILIAR TOTAL"
@@ -67,47 +69,52 @@ if df_geral is not None:
 
     f_trab = st.sidebar.multiselect("Trabalha?", sorted(list(df_unicos[col_trab].unique())), default=list(df_unicos[col_trab].unique()))
     f_renda = st.sidebar.multiselect("Renda:", sorted(list(df_unicos[col_renda].unique())), default=list(df_unicos[col_renda].unique()))
-    f_benef = st.sidebar.multiselect("Benefício:", sorted(list(df_unicos[col_benef].unique())), default=list(df_unicos[col_benef].unique()))
+    
+    # Busca pela coluna de benefício (ajustando para possíveis espaços no nome da coluna)
+    col_benef_real = [c for c in df_geral.columns if "A FAMÍLIA RECEBE ALGUM TIPO DE BENEFÍCIO" in c][0]
+    f_benef = st.sidebar.multiselect("Benefício?", sorted(list(df_unicos[col_benef_real].unique())), default=list(df_unicos[col_benef_real].unique()))
 
-    # Filtragem
+    # Aplicação dos filtros na base de famílias
     df_filtrado = df_unicos[
         (df_unicos[col_trab].isin(f_trab)) & 
         (df_unicos[col_renda].isin(f_renda)) &
-        (df_unicos[col_benef].isin(f_benef))
+        (df_unicos[col_benef_real].isin(f_benef))
     ].copy()
 
-    # Ordenação por Vulnerabilidade (Não trabalha + Sem benefício = Topo)
-    df_filtrado['VULN'] = df_filtrado.apply(lambda r: 0 if "NÃO" in r[col_trab] and "NÃO" in r[col_benef] else 1, axis=1)
+    # Ordenação: Quem não trabalha e não tem benefício fica no topo
+    df_filtrado['VULN'] = df_filtrado.apply(lambda r: 0 if "NÃO" in r[col_trab] and "NÃO" in r[col_benef_real] else 1, axis=1)
     df_filtrado = df_filtrado.sort_values('VULN')
 
-    # --- 5. INTERFACE ---
+    # --- 5. INTERFACE PRINCIPAL ---
     st.markdown('<div class="main-header"><h1>Socioeconômico Famílias CAS</h1></div>', unsafe_allow_html=True)
     
     c1, c2 = st.columns(2)
+    # Exibe o número de famílias filtradas (ex: 222)
     c1.metric("Unidades Familiares", len(df_filtrado))
-    c2.metric("Total de Matrículas", len(df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(df_filtrado["NOME DO RESPONSÁVEL"])]))
+    c2.metric("Matrículas Totais no Grupo", len(df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(df_filtrado["NOME DO RESPONSÁVEL"])]))
 
     lista_nomes = [n for n in df_filtrado["NOME DO RESPONSÁVEL"].tolist() if n != "-"]
-    selecionado = st.selectbox("🎯 Selecionar Responsável:", ["SELECIONE UM NOME..."] + lista_nomes)
+    selecionado = st.selectbox("🎯 Escolha um Responsável para Ver a Ficha Completa:", ["SELECIONE..."] + lista_nomes)
 
-    # --- 6. PRONTUÁRIO ---
-    if selecionado != "SELECIONE UM NOME...":
+    # --- 6. PRONTUÁRIO DETALHADO ---
+    if selecionado != "SELECIONE...":
         st.write("---")
         familia_data = df_geral[df_geral["NOME DO RESPONSÁVEL"] == selecionado]
         dados_base = familia_data.iloc[0]
 
-        if "NÃO" in dados_base[col_trab] and "NÃO" in dados_base[col_benef]:
-            st.markdown(f'<div class="status-alerta">🚨 ALERTA: Esta família está em situação de vulnerabilidade (Sem Trabalho e Sem Benefício).</div>', unsafe_allow_html=True)
+        # Alerta de Vulnerabilidade
+        if "NÃO" in dados_base[col_trab] and "NÃO" in dados_base[col_benef_real]:
+            st.markdown(f'<div class="status-alerta">⚠️ ALERTA: Responsável sem ocupação remunerada e sem benefícios sociais registrados.</div>', unsafe_allow_html=True)
 
         ctit, cbtn = st.columns([3, 1])
-        ctit.subheader(f"🏠 Ficha Social: {selecionado}")
+        ctit.subheader(f"🏠 Prontuário Social: {selecionado}")
         
-        if cbtn.button("🚀 Adicionar para Exportar"):
+        if cbtn.button("➕ Adicionar para Exportação"):
             if selecionado not in st.session_state.lista_exportacao:
                 st.session_state.lista_exportacao.append(selecionado)
                 st.rerun()
 
-        st.write("### 📄 Dados Cadastrais Completos")
+        st.write("### 📄 Dados de Cadastro (Raio-X)")
         grid = st.columns(4)
         for i, coluna in enumerate(df_geral.columns.tolist()):
             with grid[i % 4]:
@@ -117,20 +124,20 @@ if df_geral is not None:
                 </div>''', unsafe_allow_html=True)
 
         st.write("---")
-        st.write(f"### 👨‍👩‍👧‍👦 Integrantes no CAS ({len(familia_data)})")
+        st.write(f"### 👨‍👩‍👧‍👦 Membros Matriculados ({len(familia_data)})")
         st.table(familia_data[["NOME DO PARTICIPANTE (ATIVIDADES)", "IDADE (PARTICIPANTE)", "ATIVIDADE DESEJADA", "TURNO"]])
 
     # --- 7. EXPORTAÇÃO ---
     if st.session_state.lista_exportacao:
         st.sidebar.write("---")
-        st.sidebar.subheader("📦 Lista de Saída")
+        st.sidebar.subheader("📦 Exportar Selecionados")
         df_exp = df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(st.session_state.lista_exportacao)]
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
             df_exp.to_excel(writer, index=False)
-        st.sidebar.download_button("📥 Baixar Planilha", buf.getvalue(), "Relatorio_CAS_2026.xlsx", use_container_width=True)
-        if st.sidebar.button("🗑️ Limpar"):
+        st.sidebar.download_button("📥 Baixar Excel", buf.getvalue(), "Relatorio_Familias_Selecionadas.xlsx", use_container_width=True)
+        if st.sidebar.button("🗑️ Limpar Lista"):
             st.session_state.lista_exportacao = []
             st.rerun()
 else:
-    st.info("Carregue a planilha para iniciar o diagnóstico.")
+    st.info("Aguardando carregamento da planilha...")
