@@ -5,13 +5,12 @@ import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="CAS | Gestão Socioassistencial", layout="wide", page_icon="🧠")
+st.set_page_config(page_title="CAS | Sistema Unificado", layout="wide", page_icon="🧠")
 
-# Inicialização da lista de exportação no estado da sessão
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
 
-# --- 2. CSS PARA DESIGN TÉCNICO E ALTO CONTRASTE ---
+# --- 2. CSS PARA DESIGN DE ALTO CONTRASTE ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
@@ -32,141 +31,131 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO E NORMALIZAÇÃO DE DADOS ---
+# --- 3. CARREGAMENTO E LIMPEZA (REVISÃO DE DADOS) ---
 @st.cache_data
 def load_and_clean_data():
-    # Procura por qualquer ficheiro Excel ou CSV que contenha "Planilha Matriculados"
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
     if not arquivos: return None
     path = arquivos[0]
     try:
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
-        # Limpa nomes das colunas (remove espaços e quebras de linha)
         df.columns = [str(c).strip().replace('\n', ' ') for c in df.columns]
-        # Normaliza todos os dados para maiúsculas e remove espaços extras
+        
+        # Limpeza profunda: Resolve erro de "Noturno" e "Tarde" duplicados ou errados
         for col in df.columns:
-            df[col] = df[col].fillna("NÃO INFORMADO").astype(str).str.strip().str.upper()
-        return df.replace("NAN", "NÃO INFORMADO").replace("", "NÃO INFORMADO")
+            df[col] = df[col].astype(str).str.strip().str.upper()
+            df[col] = df[col].replace(['NAN', 'NONE', '', ' '], 'NÃO INFORMADO')
+        return df
     except Exception as e:
-        st.error(f"Erro no processamento dos dados: {e}")
+        st.error(f"Erro ao carregar dados: {e}")
         return None
 
 df_base = load_and_clean_data()
 
 if df_base is not None:
-    # MAPEAMENTO DE COLUNAS CHAVE
+    # DEFINIÇÃO DE COLUNAS (Índices exatos da sua tabela)
     COL_PARTICIPANTE = df_base.columns[0]   # Coluna A
-    COL_RESPONSAVEL = "NOME DO RESPONSÁVEL" # Coluna T (Nome do Responsável)
+    COL_RESPONSAVEL = df_base.columns[16]  # Coluna Q (Nome do Responsável)
     COL_TRAMPO = "EXERCE ATIVIDADE REMUNERADA:"
     COL_RENDA = "RENDA FAMILIAR TOTAL"
     
-    # Índices das 22 colunas solicitadas para gráficos
-    idx_graficos = [1, 2, 4, 6, 7, 9, 10, 11, 13, 17, 18, 19, 20, 21, 23, 24, 27, 28, 29, 31, 33, 37]
+    # Lista das 22 colunas solicitadas (B, C, E, G, H, J, K, L, N, R, S, T, U, V, X, Y, AB, AC, AD, AF, AH, AL)
+    # Ajustado conforme a estrutura de índices da sua planilha CSV enviada
+    idx_alvo = [1, 2, 4, 6, 7, 9, 10, 11, 13, 17, 18, 19, 20, 21, 23, 24, 27, 28, 29, 31, 33, 37]
 
-    # --- 4. INDICADORES NO TOPO (KPIs) ---
-    # Famílias: Considera apenas as linhas onde a Coluna T (Responsável) está preenchida
+    # --- 4. CONTADORES NO TOPO ---
+    # Unidade Familiar = Registros únicos na coluna de Responsável
     df_familias_unicas = df_base[df_base[COL_RESPONSAVEL] != "NÃO INFORMADO"]
-    total_familias = len(df_familias_unicas)
-    
-    # Participantes: Total de inscritos na Coluna A
+    total_familias = len(df_familias_unicas[COL_RESPONSAVEL].unique())
     total_participantes = len(df_base[df_base[COL_PARTICIPANTE] != "NÃO INFORMADO"])
 
-    st.markdown('<div class="main-header"><h1>Painel de Inteligência Familiar | CAS</h1></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header"><h1>Painel Unificado de Gestão Social | CAS</h1></div>', unsafe_allow_html=True)
     
     k1, k2, k3 = st.columns(3)
     with k1:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">🏠 Famílias no CAS</div><div class="kpi-value">{total_familias}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">🏠 Total de Famílias</div><div class="kpi-value">{total_familias}</div></div>', unsafe_allow_html=True)
     with k2:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Participantes Ativos</div><div class="kpi-value">{total_participantes}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Total de Participantes</div><div class="kpi-value">{total_participantes}</div></div>', unsafe_allow_html=True)
     with k3:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📋 Selecionados para Exportar</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📋 Exportação Ativa</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
 
-    # --- 5. FILTROS SOCIOECONÓMICOS (TRIAGEM) ---
+    # --- 5. FILTROS SOCIOECONÓMICOS ---
     st.write("---")
-    st.subheader("🔍 Triagem de Vulnerabilidade")
-    f_col1, f_col2, f_col3 = st.columns([1, 1, 2])
+    f1, f2, f3 = st.columns([1, 1, 2])
+    with f1:
+        op_t = sorted(df_base[COL_TRAMPO].unique())
+        sel_t = st.multiselect("Status de Trabalho", op_t, default=op_t)
+    with f2:
+        op_r = sorted(df_base[COL_RENDA].unique())
+        sel_r = st.multiselect("Faixa de Renda", op_r, default=op_r)
     
-    with f_col1:
-        op_trampo = sorted(df_base[COL_TRAMPO].unique())
-        sel_trampo = st.multiselect("Status de Emprego", op_trampo, default=op_trampo)
+    # Filtro aplicado sobre a base de famílias
+    df_f = df_familias_unicas[(df_familias_unicas[COL_TRAMPO].isin(sel_t)) & (df_familias_unicas[COL_RENDA].isin(sel_r))]
     
-    with f_col2:
-        op_renda = sorted(df_base[COL_RENDA].unique())
-        sel_renda = st.multiselect("Faixa de Renda", op_renda, default=op_renda)
+    with f3:
+        nomes_resp = sorted([str(n) for n in df_f[COL_RESPONSAVEL].unique()])
+        selecionado = st.selectbox("🔍 Pesquisar Família (Responsável):", ["SELECIONE..."] + nomes_resp)
 
-    # Aplicação do filtro para encontrar os responsáveis
-    df_filtrado = df_familias_unicas[(df_familias_unicas[COL_TRAMPO].isin(sel_trampo)) & (df_familias_unicas[COL_RENDA].isin(sel_renda))]
-    
-    with f_col3:
-        lista_busca = sorted([str(n) for n in df_filtrado[COL_RESPONSAVEL].unique()])
-        selecionado = st.selectbox("🎯 Localizar Responsável Familiar:", ["SELECIONE UM NOME..."] + lista_busca)
-
-    # --- 6. FICHA TÉCNICA E SELEÇÃO PARA EXPORTAR ---
-    if selecionado != "SELECIONE UM NOME...":
+    # --- 6. FICHA DO RESPONSÁVEL E SELEÇÃO ---
+    if selecionado != "SELECIONE...":
         st.write("---")
-        dados_familia = df_filtrado[df_filtrado[COL_RESPONSAVEL] == selecionado].iloc[0]
+        dados = df_f[df_f[COL_RESPONSAVEL] == selecionado].iloc[0]
         
-        c_tit, c_btn = st.columns([3, 1])
-        c_tit.subheader(f"📂 Ficha de Unidade Familiar: {selecionado}")
+        c_t, c_b = st.columns([3, 1])
+        c_t.subheader(f"📄 Prontuário: {selecionado}")
         
         if selecionado not in st.session_state.lista_exportacao:
-            if c_btn.button("➕ Adicionar à Lista de Exportação"):
+            if c_b.button("➕ Adicionar para Relatório"):
                 st.session_state.lista_exportacao.append(selecionado)
                 st.rerun()
         else:
-            st.info("✅ Esta família já está na sua lista de exportação.")
-            if c_btn.button("❌ Remover da Lista"):
+            if c_b.button("❌ Remover da Lista"):
                 st.session_state.lista_exportacao.remove(selecionado)
                 st.rerun()
 
-        with st.expander("📄 Visualizar Prontuário Completo desta Linha", expanded=True):
+        with st.expander("👁️ Ver Dados Completos da Família", expanded=True):
             grid = st.columns(4)
             for i, col in enumerate(df_base.columns):
                 with grid[i % 4]:
-                    st.markdown(f'<div class="data-card"><div class="label-card">{col}</div><div class="value-card">{dados_familia[col]}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="data-card"><div class="label-card">{col}</div><div class="value-card">{dados[col]}</div></div>', unsafe_allow_html=True)
 
-    # --- 7. DIAGNÓSTICO ESTATÍSTICO (GRÁFICOS NO FINAL) ---
+    # --- 7. GRÁFICOS ANALÍTICOS UNIFICADOS (REVISÃO DE QUANTIDADE) ---
     st.write("---")
-    st.subheader("📊 Diagnóstico Situacional do Território")
-    st.info("Os gráficos abaixo quantificam os dados das famílias que passam pelos filtros acima.")
+    st.subheader("📊 Diagnóstico Situacional (Quantificação Absoluta)")
     
-    
+    # Loop para gerar os 22 gráficos das colunas solicitadas
+    cols_visual = st.columns(2)
+    colunas_graficos = [df_base.columns[i] for i in idx_alvo if i < len(df_base.columns)]
 
-    g_layout = st.columns(2)
-    cols_graficos = [df_base.columns[i] for i in idx_graficos if i < len(df_base.columns)]
-
-    for idx, nome_col in enumerate(cols_graficos):
-        with g_layout[idx % 2]:
-            contagem = df_filtrado[nome_col].value_counts().reset_index()
-            contagem.columns = [nome_col, 'QUANTIDADE']
+    for idx, col_nome in enumerate(colunas_graficos):
+        with cols_visual[idx % 2]:
+            # Contagem precisa: Garante que os números batem com a tabela
+            contagem = df_f[col_nome].value_counts().reset_index()
+            contagem.columns = [col_nome, 'CONT']
+            contagem = contagem.sort_values(by='CONT', ascending=False)
             
-            # Gráfico de barras horizontais com cor ICEFIRE (Alta visibilidade)
             fig = px.bar(
-                contagem, y=nome_col, x='QUANTIDADE', orientation='h',
-                title=f"DISTRIBUIÇÃO: {nome_col}",
-                color='QUANTIDADE', color_continuous_scale='icefire', text='QUANTIDADE'
+                contagem, y=col_nome, x='CONT', orientation='h',
+                title=f"INDICADOR: {col_nome}",
+                color='CONT', color_continuous_scale='icefire', text='CONT'
             )
             fig.update_layout(
                 height=350, showlegend=False, coloraxis_showscale=False,
-                margin=dict(l=0, r=40, t=40, b=20)
+                margin=dict(l=0, r=50, t=40, b=20),
+                yaxis={'categoryorder':'total ascending'}
             )
             fig.update_traces(textposition='outside', textfont=dict(weight='bold', color='black'))
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- 8. BARRA LATERAL PARA EXPORTAÇÃO ---
+    # --- 8. EXPORTAÇÃO (SIDEBAR) ---
     if st.session_state.lista_exportacao:
         st.sidebar.markdown("---")
-        st.sidebar.subheader("📥 Relatório de Triagem")
-        st.sidebar.write(f"Total: {len(st.session_state.lista_exportacao)} famílias.")
-        
-        df_final = df_base[df_base[COL_RESPONSAVEL].isin(st.session_state.lista_exportacao)]
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_final.to_excel(writer, index=False)
-        
-        st.sidebar.download_button("🚀 Baixar Excel das Selecionadas", output.getvalue(), "Relatorio_CAS_Triagem.xlsx", use_container_width=True)
-        if st.sidebar.button("🗑️ Limpar Lista"):
-            st.session_state.lista_exportacao = []
-            st.rerun()
+        st.sidebar.subheader("📥 Relatório")
+        df_exp = df_base[df_base[COL_RESPONSAVEL].isin(st.session_state.lista_exportacao)]
+        buf = BytesIO()
+        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
+            df_exp.to_excel(writer, index=False)
+        st.sidebar.download_button("🚀 Baixar Excel das Selecionadas", buf.getvalue(), "Relatorio_CAS.xlsx", use_container_width=True)
+
 else:
-    st.error("Planilha não encontrada. Verifique o nome do ficheiro.")
+    st.error("Planilha 'Planilha Matriculados' não encontrada no servidor.")
