@@ -4,55 +4,80 @@ import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Vulnerabilidade Social - CAS", layout="wide")
+st.set_page_config(page_title="CAS - Análise de Vulnerabilidade", layout="wide")
 
 st.markdown("""
     <style>
     .main { background-color: #ffffff; }
-    /* Estilo dos Cards (Caixinhas) */
+    /* Estilo das Caixinhas (Cards) */
     .card-cas {
-        background-color: #f1f5f9;
+        background-color: #f8fafc;
         padding: 20px;
         border-radius: 12px;
-        border-top: 5px solid #1e3a8a;
-        margin-bottom: 15px;
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.05);
+        border-left: 10px solid #1e3a8a;
+        border-bottom: 1px solid #e2e8f0;
+        margin-bottom: 20px;
+        box-shadow: 4px 4px 10px rgba(0,0,0,0.05);
     }
-    .texto-preto { color: #000000 !important; font-size: 16px; font-weight: 600; margin-bottom: 5px; }
-    .label-cinza { color: #475569 !important; font-size: 13px; font-weight: bold; text-transform: uppercase; }
-    .titulo-painel { color: #1e3a8a !important; font-weight: 800; font-size: 24px; margin-bottom: 20px; }
+    .texto-preto { color: #000000 !important; font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .label-info { color: #475569 !important; font-size: 12px; text-transform: uppercase; font-weight: bold; }
+    .titulo-secao { color: #1e3a8a !important; font-weight: 900; font-size: 26px; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. CARREGAMENTO DOS DADOS
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ARQUIVO = "Planilha Matriculados.xlsx - Planilha1.csv"
-CAMINHO = os.path.join(BASE_DIR, ARQUIVO)
-
+# 2. FUNÇÃO DE CARREGAMENTO INTELIGENTE
 @st.cache_data
-def carregar_dados_vulnerabilidade(caminho):
-    if not os.path.exists(caminho): return None
-    df = pd.read_csv(caminho, dtype=str)
-    df.columns = [str(c).strip().replace('\n', ' ') for c in df.columns]
-    return df
+def carregar_dados_flexivel():
+    # Lista de possíveis nomes de arquivo no servidor
+    arquivos = [
+        "Planilha Matriculados.xlsx - Planilha1.csv",
+        "Planilha Matriculados.xlsx",
+        "Planilha_Matriculados.csv"
+    ]
+    
+    for nome in arquivos:
+        if os.path.exists(nome):
+            try:
+                if nome.endswith('.csv'):
+                    df = pd.read_csv(nome, dtype=str)
+                else:
+                    df = pd.read_excel(nome, dtype=str)
+                # Limpa nomes de colunas
+                df.columns = [str(c).strip().replace('\n', ' ') for c in df.columns]
+                return df
+            except:
+                continue
+    return None
 
-df_geral = carregar_dados_vulnerabilidade(CAMINHO)
+df_geral = carregar_dados_flexivel()
 
+# Se não encontrar o arquivo automaticamente, permite o upload manual
+if df_geral is None:
+    st.warning("⚠️ Arquivo padrão não encontrado no servidor.")
+    arquivo_upload = st.file_uploader("Por favor, carregue a planilha 'Planilha Matriculados' aqui:", type=["csv", "xlsx"])
+    if arquivo_upload:
+        if arquivo_upload.name.endswith('.csv'):
+            df_geral = pd.read_csv(arquivo_upload, dtype=str)
+        else:
+            df_geral = pd.read_excel(arquivo_upload, dtype=str)
+        df_geral.columns = [str(c).strip().replace('\n', ' ') for c in df_geral.columns]
+
+# --- PROCESSAMENTO DOS DADOS ---
 if df_geral is not None:
-    # Nomes exatos das colunas da sua planilha
+    # Mapeamento de colunas cruciais
     col_t = "NOME DO RESPONSÁVEL:"
     col_renda = "RENDA FAMILIAR MENSAL TOTAL:"
     col_trabalho = "EXERCE ATIVIDADE REMUNERADA:"
     col_beneficio = "A FAMÍLIA É BENEFICIÁRIA DE ALGUM PROGRAMA SOCIAL GOVERNAMENTAL:"
-    col_quais_benef = "INFORMA O(S) PROGRAMA(S):"
+    col_moradia = "SITUAÇÃO DA MORADIA:"
     
-    # Base apenas de responsáveis (Coluna T preenchida)
+    # Criar base de responsáveis (Apenas linhas onde a Coluna T está preenchida)
     df_resp = df_geral[df_geral[col_t].notna() & (df_geral[col_t].str.strip() != "")].copy()
 
-    # --- SIDEBAR (FILTROS À ESQUERDA) ---
+    # --- SIDEBAR (FILTROS) ---
     st.sidebar.header("⚖️ Filtros de Vulnerabilidade")
     
-    # 1. Filtro de Renda (Ordenado por vulnerabilidade)
+    # Filtro de Renda (Ordenado por criticidade)
     ordem_renda = [
         "SEM RENDA", 
         "ATÉ R$ 405,26", 
@@ -60,75 +85,74 @@ if df_geral is not None:
         "DE R$ 810,50 A R$ 1.215,76",
         "DE R$ 1.215,76 A R$ 1.621,00 (TRÊS QUARTOS A UM SALÁRIO MÍNIMO)"
     ]
-    # Pega o que existe na planilha e ordena conforme a lista acima
-    opcoes_renda = ["Todos"] + [r for r in ordem_renda if r in df_resp[col_renda].unique()]
-    f_renda = st.sidebar.selectbox("Renda Mensal:", opcoes_renda)
+    rendas_na_planilha = df_resp[col_renda].unique()
+    opcoes_renda = ["Todos"] + [r for r in ordem_renda if r in rendas_na_planilha]
+    f_renda = st.sidebar.selectbox("Renda Familiar:", opcoes_renda)
     
-    # 2. Filtro de Trabalho (Sim, Não, Temporário...)
+    # Filtro de Trabalho
     opcoes_trabalho = ["Todos"] + sorted(df_resp[col_trabalho].unique().astype(str).tolist())
-    f_trabalho = st.sidebar.selectbox("Vínculo de Trabalho:", opcoes_trabalho)
+    f_trabalho = st.sidebar.selectbox("Situação de Trabalho:", opcoes_trabalho)
 
-    # Aplicar filtros na lista de nomes
+    # Filtrar nomes para o seletor de responsável
     df_filtrado = df_resp.copy()
     if f_renda != "Todos":
         df_filtrado = df_filtrado[df_filtrado[col_renda] == f_renda]
     if f_trabalho != "Todos":
         df_filtrado = df_filtrado[df_filtrado[col_trabalho] == f_trabalho]
 
-    # 3. Filtro do Responsável (Aparece após os filtros econômicos)
     lista_nomes = sorted(df_filtrado[col_t].unique().tolist())
-    selecionado = st.sidebar.selectbox(f"Responsável ({len(lista_nomes)}):", ["Selecione..."] + lista_nomes)
+    selecionado = st.sidebar.selectbox(f"👤 Selecione o Responsável ({len(lista_nomes)}):", ["Selecione..."] + lista_nomes)
 
-    # --- PAINEL PRINCIPAL (CAIXINHAS À DIREITA) ---
-    st.markdown("<h1 style='color: #1e3a8a;'>Análise de Vulnerabilidade Familiar</h1>", unsafe_allow_html=True)
-
+    # --- ÁREA PRINCIPAL ---
     if selecionado != "Selecione...":
-        # Dados da linha do responsável e da família inteira
-        chefe = df_resp[df_resp[col_t] == selecionado].iloc[0]
-        familia_completa = df_geral[df_geral[col_t] == selecionado]
+        # Extrair dados da linha do responsável (Pela Coluna T)
+        dados_resp = df_resp[df_resp[col_t] == selecionado].iloc[0]
+        # Extrair todos os membros da família
+        dados_familia = df_geral[df_geral[col_t] == selecionado]
 
-        st.markdown(f"<div class='titulo-painel'>Responsável: {selecionado}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='titulo-secao'>Dossiê de Vulnerabilidade: {selecionado}</div>", unsafe_allow_html=True)
+        st.write(" ")
 
-        # LINHA 1 DE CAIXINHAS
+        # CAIXINHAS DE DADOS (CARDS)
         c1, c2, c3 = st.columns(3)
+        
         with c1:
             st.markdown(f"""<div class="card-cas">
-                <p class="label-cinza">📍 Localização</p>
-                <p class="texto-preto">Bairro: {chefe.get('BAIRRO:', 'N/A')}</p>
-                <p class="texto-preto">Cidade: {chefe.get('MUNICÍPIO:', 'N/A')}</p>
-                <p class="texto-preto">Endereço: {chefe.get('ENDEREÇO COMPLETO:', 'N/A')}</p>
+                <p class="label-info">📍 Endereço e Localização</p>
+                <p class="texto-preto">Bairro: {dados_resp.get('BAIRRO:', 'N/A')}</p>
+                <p class="texto-preto">Rua/Nº: {dados_resp.get('ENDEREÇO COMPLETO:', 'N/A')}</p>
+                <p class="texto-preto">Moradia: {dados_resp.get(col_moradia, 'N/A')}</p>
             </div>""", unsafe_allow_html=True)
-        
+            
         with c2:
             st.markdown(f"""<div class="card-cas">
-                <p class="label-cinza">💰 Economia</p>
-                <p class="texto-preto">Renda: {chefe.get(col_renda, 'N/A')}</p>
-                <p class="texto-preto">Trabalho: {chefe.get(col_trabalho, 'N/A')}</p>
-                <p class="texto-preto">Moradia: {chefe.get('SITUAÇÃO DA MORADIA:', 'N/A')}</p>
+                <p class="label-info">💰 Situação Econômica</p>
+                <p class="texto-preto">Renda: {dados_resp.get(col_renda, 'N/A')}</p>
+                <p class="texto-preto">Trabalho: {dados_resp.get(col_trabalho, 'N/A')}</p>
+                <p class="texto-preto">Contatos: {dados_resp.get('CONTATO:', 'N/A')}</p>
             </div>""", unsafe_allow_html=True)
             
         with c3:
             st.markdown(f"""<div class="card-cas">
-                <p class="label-cinza">🛡️ Programas Sociais</p>
-                <p class="texto-preto">Beneficiário: {chefe.get(col_beneficio, 'N/A')}</p>
-                <p class="texto-preto">Programas: {chefe.get(col_quais_benef, 'N/A')}</p>
-                <p class="texto-preto">Contatos: {chefe.get('CONTATO:', 'N/A')}</p>
+                <p class="label-info">🛡️ Assistência e Benefícios</p>
+                <p class="texto-preto">Possui Benefício? {dados_resp.get(col_beneficio, 'N/A')}</p>
+                <p class="texto-preto">Quais? {dados_resp.get('INFORMA O(S) PROGRAMA(S):', 'Nenhum')}</p>
+                <p class="texto-preto">Nº de Pessoas: {dados_resp.get('NÚMERO DE PESSOAS NO GRUPO FAMILIAR:', 'N/A')}</p>
             </div>""", unsafe_allow_html=True)
 
-        # TABELA PARA EXPANDIR
+        # TABELA DE EXPANSÃO TOTAL
         st.write("---")
-        st.subheader("📋 Composição e Dados do Grupo Familiar")
-        with st.expander("CLIQUE PARA EXPANDIR E VER TODOS OS DADOS CORRELACIONADOS (56 COLUNAS)", expanded=False):
-            st.dataframe(familia_completa, use_container_width=True)
+        st.subheader("🔍 Detalhamento Correlacionado (Membros da Família)")
+        with st.expander("CLIQUE AQUI PARA VER AS 56 COLUNAS DE TODOS OS DEPENDENTES", expanded=False):
+            st.dataframe(dados_familia, use_container_width=True)
             
-            # Botão de exportação
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                familia_completa.to_excel(writer, index=False)
-            st.download_button(f"📥 Exportar Ficha de {selecionado}", output.getvalue(), f"Ficha_{selecionado}.xlsx")
+            # Exportação
+            buffer = BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                dados_familia.to_excel(writer, index=False)
+            st.download_button(f"📥 Baixar Relatório Completo - {selecionado}", buffer.getvalue(), f"Ficha_{selecionado}.xlsx")
 
     else:
-        st.info("👈 Use os filtros de Renda e Trabalho na esquerda para localizar as famílias e ver os dados.")
-
+        st.info("👈 Use os filtros na lateral esquerda para localizar a família por renda ou situação de trabalho.")
 else:
-    st.error("Planilha não encontrada. Verifique o arquivo: Planilha Matriculados.xlsx - Planilha1.csv")
+    st.error("❌ Não foi possível carregar a base de dados. Verifique se o arquivo está no GitHub ou faça o upload manual acima.")
