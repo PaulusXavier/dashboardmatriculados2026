@@ -1,151 +1,135 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Dashboard CAS - SETRABES", layout="wide")
+st.set_page_config(page_title="Gestão de Vulnerabilidade CAS", layout="wide")
 
-# Estilo para leitura clara e contraste
 st.markdown("""
     <style>
     .main { background-color: #ffffff; }
-    .card-leitura {
+    .card-vulnerabilidade {
         background-color: #f1f5f9;
-        padding: 22px;
+        padding: 20px;
         border-radius: 12px;
-        border: 2px solid #1e3a8a;
+        border-left: 8px solid #1e3a8a;
         margin-bottom: 15px;
     }
     .texto-preto { color: #000000 !important; font-size: 16px; font-weight: 600; }
-    .titulo-card { color: #1e3a8a !important; font-weight: bold; font-size: 19px; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; }
-    .metric-container {
-        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
-        color: white; padding: 25px; border-radius: 15px; text-align: center;
-    }
+    .titulo-card { color: #1e3a8a !important; font-weight: bold; font-size: 18px; margin-bottom: 10px; }
+    .stCheckbox { background-color: #e2e8f0; padding: 10px; border-radius: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. CARREGAMENTO E FILTRAGEM (LÓGICA DA COLUNA T)
+# 2. CARREGAMENTO DOS DADOS
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Tenta localizar o arquivo (Excel ou CSV)
-NOME_ARQUIVO = "Planilha Matriculados.xlsx"
-CAMINHO = os.path.join(BASE_DIR, NOME_ARQUIVO)
+CAMINHO = os.path.join(BASE_DIR, "Planilha Matriculados.xlsx - Planilha1.csv")
 
 @st.cache_data
-def carregar_dados_robustos(caminho):
-    # Verificação de existência do arquivo para evitar o TypeError
-    if not os.path.exists(caminho):
-        # Se não achar o .xlsx, tenta procurar o .csv que o Streamlit pode ter gerado
-        caminho_csv = caminho.replace(".xlsx", ".xlsx - Planilha1.csv")
-        if not os.path.exists(caminho_csv):
-            return None, None
-        caminho = caminho_csv
-
+def carregar_dados_brutos(caminho):
+    if not os.path.exists(caminho): return None
     try:
-        if caminho.endswith('.csv'):
-            df = pd.read_csv(caminho, dtype=str)
-        else:
-            df = pd.read_excel(caminho, dtype=str)
-        
-        # Limpeza de nomes de colunas
+        df = pd.read_csv(caminho, dtype=str)
         df.columns = [str(c).strip().replace('\n', ' ') for c in df.columns]
-        
-        # REGRA SOLICITADA: Base baseada na Coluna T (NOME DO RESPONSÁVEL:)
-        col_t = "NOME DO RESPONSÁVEL:"
-        if col_t in df.columns:
-            # Filtra apenas linhas onde a coluna T não está vazia
-            df_estatistico = df[df[col_t].notna() & (df[col_t].str.strip() != "")].copy()
-            return df, df_estatistico
-        return df, df
-    except Exception as e:
-        return None, None
+        return df
+    except: return None
 
-# Desempacotamento seguro
-df_geral, df_estatistico = carregar_dados_robustos(CAMINHO)
+df_geral = carregar_dados_brutos(CAMINHO)
 
-if df_geral is not None and df_estatistico is not None:
-    # Nomes das colunas para os gráficos
+if df_geral is not None:
     col_t = "NOME DO RESPONSÁVEL:"
     col_renda = "RENDA FAMILIAR MENSAL TOTAL:"
-    col_nacionalidade = "NACIONALIDADE:"
-    col_est_civil = "ESTADO CIVIL:"
-    col_genero = "GÊNERO:" 
+    col_trabalha = "EXERCE ATIVIDADE REMUNERADA:"
 
-    # Indicadores de Topo
-    st.write("### 📊 Estatísticas Consolidadas")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(f'<div class="metric-container"><h4>👨‍👩‍👧‍👦 Total de Responsáveis (Coluna T Preenchida)</h4><h2 style="font-size: 50px;">{len(df_estatistico)}</h2></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown(f'<div class="metric-container"><h4>📝 Total de Matrículas (Geral)</h4><h2 style="font-size: 50px;">{len(df_geral)}</h2></div>', unsafe_allow_html=True)
+    # Base de Responsáveis (Coluna T preenchida)
+    df_responsaveis = df_geral[df_geral[col_t].notna() & (df_geral[col_t].str.strip() != "")].copy()
 
-    st.write("---")
+    st.title("📋 Triagem e Exportação de Famílias")
+    st.write("Selecione os critérios abaixo, marque as famílias desejadas e exporte a lista completa.")
 
-    # Barra Lateral
-    st.sidebar.header("🔍 Busca por Responsável")
-    nomes_unicos = sorted(df_estatistico[col_t].unique().tolist())
-    selecionado = st.sidebar.selectbox("Escolha um nome:", ["Selecione..."] + nomes_unicos)
+    # --- FILTROS LATERAIS ---
+    st.sidebar.header("🎯 Filtros de Vulnerabilidade")
+    f_renda = st.sidebar.selectbox("Filtrar por Renda:", ["Todos"] + sorted(df_responsaveis[col_renda].unique().tolist()))
+    f_trampo = st.sidebar.selectbox("Está Trabalhando?", ["Todos"] + sorted(df_responsaveis[col_trabalha].unique().tolist()))
 
-    if selecionado != "Selecione...":
-        dados_f = df_geral[df_geral[col_t] == selecionado]
-        chefe = df_estatistico[df_estatistico[col_t] == selecionado].iloc[0]
+    # Aplicar filtros à base de responsáveis
+    df_filtrado = df_responsaveis.copy()
+    if f_renda != "Todos": df_filtrado = df_filtrado[df_filtrado[col_renda] == f_renda]
+    if f_trampo != "Todos": df_filtrado = df_filtrado[df_filtrado[col_trabalha] == f_trampo]
 
-        # Cards com letras Pretas (Contraste Máximo)
-        r1, r2 = st.columns(2)
-        with r1:
-            st.markdown(f"""<div class="card-leitura"><div class="titulo-card">🏠 Identificação</div>
-                <p class="texto-preto"><b>Nome:</b> {selecionado}</p>
-                <p class="texto-preto"><b>Nacionalidade:</b> {chefe.get(col_nacionalidade, 'N/A')}</p>
-                <p class="texto-preto"><b>Bairro:</b> {chefe.get('BAIRRO:', 'N/A')}</p></div>""", unsafe_allow_html=True)
-        with r2:
-            st.markdown(f"""<div class="card-leitura"><div class="titulo-card">💰 Dados Sociais</div>
-                <p class="texto-preto"><b>Renda:</b> {chefe.get(col_renda, 'N/A')}</p>
-                <p class="texto-preto"><b>Estado Civil:</b> {chefe.get(col_est_civil, 'N/A')}</p>
-                <p class="texto-preto"><b>Trabalha:</b> {chefe.get('EXERCE ATIVIDADE REMUNERADA:', 'N/A')}</p></div>""", unsafe_allow_html=True)
+    # --- SISTEMA DE MARCAÇÃO (CHECKBOX) ---
+    st.subheader(f"🔍 Famílias Encontradas: {len(df_filtrado)}")
+    
+    # Criamos um container para a lista de marcação
+    selecionados = []
+    
+    col1, col2 = st.columns([1, 1])
+    
+    # Dividimos a lista em duas colunas para facilitar a visualização
+    nomes_lista = sorted(df_filtrado[col_t].unique().tolist())
+    metade = len(nomes_lista) // 2
+    
+    with col1:
+        for nome in nomes_lista[:metade]:
+            if st.checkbox(nome, key=nome):
+                selecionados.append(nome)
+                
+    with col2:
+        for nome in nomes_lista[metade:]:
+            if st.checkbox(nome, key=nome):
+                selecionados.append(nome)
 
-        with st.expander("📂 CLIQUE PARA EXPANSÃO TOTAL (56 CAMPOS)", expanded=False):
-            st.dataframe(dados_f, use_container_width=True)
-
-    # GRÁFICOS BASEADOS EXCLUSIVAMENTE NA LINHA DO RESPONSÁVEL (COLUNA T)
-    st.write("###")
+    # --- ÁREA DE EXPORTAÇÃO E DETALHES ---
     st.divider()
-    st.markdown(f"## 📊 Perfil Sociodemográfico ({len(df_estatistico)} Famílias)")
-    
-    
+    st.subheader(f"📦 Cesta de Exportação: {len(selecionados)} família(s) marcada(s)")
 
-    g1, g2 = st.columns(2)
-    with g1:
-        # Gênero
-        fig1 = px.bar(df_estatistico[col_genero].value_counts().reset_index(), 
-                     x=col_genero, y='count', text='count', title="Gênero dos Responsáveis", 
-                     color_discrete_sequence=['#1e3a8a'])
-        fig1.update_traces(textposition='outside')
-        st.plotly_chart(fig1, use_container_width=True)
-    with g2:
-        # Renda
-        fig2 = px.bar(df_estatistico[col_renda].value_counts().reset_index(), 
-                     x=col_renda, y='count', text='count', title="Renda Familiar", 
-                     color_discrete_sequence=['#be123c'])
-        fig2.update_traces(textposition='outside')
-        st.plotly_chart(fig2, use_container_width=True)
+    if selecionados:
+        # Filtra os dados de TODOS os membros das famílias marcadas
+        df_exportar = df_geral[df_geral[col_t].isin(selecionados)]
 
-    g3, g4 = st.columns(2)
-    with g3:
-        # Nacionalidade
-        fig3 = px.bar(df_estatistico[col_nacionalidade].value_counts().reset_index(), 
-                     x=col_nacionalidade, y='count', text='count', title="Nacionalidade", 
-                     color_discrete_sequence=['#f59e0b'])
-        fig3.update_traces(textposition='outside')
-        st.plotly_chart(fig3, use_container_width=True)
-    with g4:
-        # Estado Civil
-        fig4 = px.bar(df_estatistico[col_est_civil].value_counts().reset_index(), 
-                     x=col_est_civil, y='count', text='count', title="Estado Civil", 
-                     color_discrete_sequence=['#10b981'])
-        fig4.update_traces(textposition='outside')
-        st.plotly_chart(fig4, use_container_width=True)
+        c_exp1, c_exp2 = st.columns([1, 2])
+        
+        with c_exp1:
+            # Botão de Exportação em Lote
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_exportar.to_excel(writer, index=False, sheet_name='Familias_Selecionadas')
+            
+            st.download_button(
+                label="📥 EXPORTAR FAMÍLIAS MARCADAS (EXCEL)",
+                data=output.getvalue(),
+                file_name="exportacao_vulnerabilidade_cas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        with c_exp2:
+            st.warning(f"O arquivo conterá todos os dados (56 colunas) de todos os membros das {len(selecionados)} famílias selecionadas.")
+
+        # Mostrar um resumo rápido das famílias marcadas antes de exportar
+        with st.expander("👁️ Pré-visualizar dados das famílias marcadas", expanded=False):
+            st.dataframe(df_exportar[[col_t, "NOME:", col_renda, col_trabalha]], use_container_width=True)
+
+    else:
+        st.info("Marque as caixas de seleção acima para adicionar famílias à lista de exportação.")
+
+    # --- VISUALIZAÇÃO DE FICHA INDIVIDUAL (OPCIONAL) ---
+    if len(selecionados) == 1:
+        st.divider()
+        st.subheader(f"📄 Ficha Detalhada: {selecionados[0]}")
+        chefe = df_responsaveis[df_responsaveis[col_t] == selecionados[0]].iloc[0]
+        
+        c_f1, c_f2 = st.columns(2)
+        with c_f1:
+            st.markdown(f"""<div class="card-vulnerabilidade">
+                <p class="titulo-card">📍 Localização</p>
+                <p class="texto-preto">Bairro: {chefe.get('BAIRRO:', 'N/A')}</p>
+                <p class="texto-preto">Endereço: {chefe.get('ENDEREÇO COMPLETO:', 'N/A')}</p></div>""", unsafe_allow_html=True)
+        with c_f2:
+            st.markdown(f"""<div class="card-vulnerabilidade">
+                <p class="titulo-card">💰 Renda e Trabalho</p>
+                <p class="texto-preto">Renda: {chefe.get(col_renda, 'N/A')}</p>
+                <p class="texto-preto">Trabalha: {chefe.get(col_trabalha, 'N/A')}</p></div>""", unsafe_allow_html=True)
 
 else:
-    st.error("ERRO: O arquivo 'Planilha Matriculados.xlsx' não foi encontrado ou está inacessível. Verifique se o nome do arquivo no GitHub/Streamlit Cloud está idêntico.")
+    st.error("Planilha não encontrada. Verifique o arquivo.")
