@@ -31,6 +31,7 @@ st.markdown("""
 # --- 3. CARREGAMENTO E LIMPEZA DOS DADOS ---
 @st.cache_data
 def load_and_clean_data():
+    # Busca o arquivo no repositório
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
     if not arquivos: return None
     path = arquivos[0]
@@ -38,7 +39,7 @@ def load_and_clean_data():
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
         df.columns = [str(c).strip().replace('\n', ' ').upper() for c in df.columns]
         
-        # Limpeza para evitar categorias duplicadas nos gráficos
+        # Limpeza para evitar categorias duplicadas (Ex: "MANHÃ" e "MANHÃ ")
         for col in df.columns:
             df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip().str.upper()
             df[col] = df[col].replace(['NAN', 'NONE', ''], 'NÃO INFORMADO')
@@ -50,23 +51,23 @@ def load_and_clean_data():
 df_base = load_and_clean_data()
 
 if df_base is not None:
-    # COLUNAS MESTRAS
+    # DEFINIÇÃO DAS COLUNAS MESTRAS
     COL_RESP = "NOME DO RESPONSÁVEL"
     COL_PART = "NOME DO PARTICIPANTE (ATIVIDADES)"
     
-    # Índices dos indicadores para os 22 gráficos
+    # Índices dos 22 indicadores para os gráficos
     idx_graficos = [1, 2, 4, 6, 7, 9, 10, 11, 13, 17, 18, 19, 20, 21, 23, 24, 27, 28, 29, 31, 33, 37]
 
-    # --- 4. CONTADORES (TRAVADO EM 292 FAMÍLIAS) ---
-    # Contagem de linhas onde o Nome do Responsável existe (cada linha = 1 família atendida)
+    # --- 4. CONTADORES (LÓGICA DOS 292 E GERAL) ---
+    # Famílias: Contagem de linhas preenchidas na coluna de Responsável
     df_familias_validas = df_base[df_base[COL_RESP] != "NÃO INFORMADO"]
     total_familias = len(df_familias_validas) 
 
-    # Participantes: Todas as pessoas que aparecem na coluna de participantes
+    # Participantes: Todas as pessoas individuais
     df_participantes_validos = df_base[df_base[COL_PART] != "NÃO INFORMADO"]
     total_participantes = len(df_participantes_validos)
 
-    st.markdown('<div class="main-header"><h1>Painel CAS 2026 | Sistema Unificado</h1><p>Diagnóstico Socioassistencial e Fluxo de Atividades</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header"><h1>Painel CAS 2026 | Sistema Unificado</h1><p>Gestão por Unidades Familiares e Monitoramento de Participantes</p></div>', unsafe_allow_html=True)
     
     k1, k2, k3 = st.columns(3)
     with k1:
@@ -90,11 +91,11 @@ if df_base is not None:
         op_trab = sorted(df_base[col_trabalho].unique())
         sel_trab = st.multiselect("Atividade Remunerada:", op_trab, default=op_trab)
 
-    # Aplicação do Filtro
-    df_filtrado = df_familias_validas[(df_familias_validas[col_renda].isin(sel_renda)) & (df_familias_validas[col_trabalho].isin(sel_trab))]
+    # Filtro inteligente: Mostra os participantes que pertencem às famílias filtradas
+    df_filtrado = df_base[(df_base[col_renda].isin(sel_renda)) & (df_base[col_trabalho].isin(sel_trab))]
 
     with f3:
-        lista_busca = sorted([str(n) for n in df_filtrado[COL_RESP].unique()])
+        lista_busca = sorted([str(n) for n in df_filtrado[COL_RESP].unique() if n != "NÃO INFORMADO"])
         selecionado = st.selectbox("🔍 Pesquisar Família (Responsável):", ["SELECIONE..."] + lista_busca)
 
     # --- 6. FICHA TÉCNICA ---
@@ -106,19 +107,19 @@ if df_base is not None:
         c_tit, c_btn = st.columns([3, 1])
         c_tit.subheader(f"📄 Prontuário Familiar: {selecionado}")
         
-        if c_btn.button("➕ Incluir no Relatório"):
+        if c_btn.button("➕ Adicionar ao Relatório"):
             if selecionado not in st.session_state.lista_exportacao:
                 st.session_state.lista_exportacao.append(selecionado)
                 st.rerun()
 
         with st.expander("👁️ Ver Membros e Dados Socioeconômicos", expanded=True):
-            st.markdown("**Participantes desta Família:**")
+            st.markdown(f"**Esta família possui {len(df_membros)} participante(s):**")
             st.table(df_membros[[COL_PART, "ATIVIDADE DESEJADA", "TURNO"]])
             st.json(dados_fam.to_dict())
 
-    # --- 7. GRÁFICOS ANALÍTICOS (CORES ESCURAS/SÓBRIAS) ---
+    # --- 7. GRÁFICOS ANALÍTICOS (CORES SÓBRIAS) ---
     st.write("---")
-    st.subheader("📊 Diagnóstico dos Indicadores Sociais")
+    st.subheader("📊 Diagnóstico dos 22 Indicadores Sociais")
 
     
 
@@ -131,7 +132,7 @@ if df_base is not None:
             contagem.columns = [col_nome, 'CONT']
             contagem = contagem.sort_values(by='CONT', ascending=True)
 
-            # Usando escala 'Sunset' ou 'Bluered' para cores menos claras
+            # Escala Sunsetdark para elegância e contraste em projetores
             fig = px.bar(
                 contagem, y=col_nome, x='CONT', orientation='h',
                 title=f"INDICADOR: {col_nome}",
@@ -142,7 +143,7 @@ if df_base is not None:
                 margin=dict(l=0, r=50, t=40, b=20),
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
-            fig.update_traces(textposition='outside', marker_line_color='rgb(8,48,107)', marker_line_width=1.5)
+            fig.update_traces(textposition='outside', marker_line_color='rgb(8,48,107)', marker_line_width=1)
             st.plotly_chart(fig, use_container_width=True)
 
     # --- 8. EXPORTAÇÃO ---
@@ -154,4 +155,4 @@ if df_base is not None:
             df_exp.to_excel(writer, index=False)
         st.sidebar.download_button("🚀 Baixar Excel das Famílias", buf.getvalue(), "Relatorio_CAS_2026.xlsx", use_container_width=True)
 else:
-    st.error("Planilha não encontrada no repositório.")
+    st.error("Planilha 'Planilha Matriculados' não encontrada. Verifique o arquivo no GitHub.")
