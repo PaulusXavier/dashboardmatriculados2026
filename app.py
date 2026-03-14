@@ -4,7 +4,7 @@ import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO INICIAL
-st.set_page_config(page_title="Gestão Social CAS", layout="wide", page_icon="⚖️")
+st.set_page_config(page_title="Triagem de Vulnerabilidade CAS", layout="wide", page_icon="⚖️")
 
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
@@ -15,7 +15,7 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
     html, body, [class*="css"] { font-family: 'Sora', sans-serif; background-color: #f8fafc; }
     .main-header {
-        background: linear-gradient(135deg, #1e293b 0%, #ef4444 100%);
+        background: linear-gradient(135deg, #0f172a 0%, #dc2626 100%);
         padding: 2rem; border-radius: 1rem; color: white; text-align: center; margin-bottom: 2rem;
     }
     .info-card {
@@ -24,17 +24,16 @@ st.markdown("""
     }
     .label-title { color: #64748b; font-size: 0.65rem; font-weight: 800; text-transform: uppercase; }
     .value-text { color: #1e293b; font-size: 0.85rem; font-weight: 600; margin-top: 4px; }
-    .status-vulneravel {
-        background-color: #fff1f2; border: 2px solid #f43f5e; color: #9f1239;
+    .status-alerta-critico {
+        background-color: #fff1f2; border: 2px solid #be123c; color: #9f1239;
         padding: 20px; border-radius: 12px; font-weight: bold; margin-bottom: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO E LÓGICA DE RISCO ---
+# --- 3. CARREGAMENTO E CÁLCULO DE VULNERABILIDADE ---
 @st.cache_data
-def load_data():
+def load_and_score_data():
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
     if not arquivos: return None, None
     
@@ -43,110 +42,123 @@ def load_data():
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
         df.columns = [str(c).strip().upper() for c in df.columns]
         
-        # Limpeza e Padronização
+        # Limpeza
         for col in df.columns:
             df[col] = df[col].fillna("-").astype(str).str.strip().str.upper()
             df[col] = df[col].replace(['NAN', 'NONE', '', ' ', 'NULL'], '-')
         
-        # Base de Famílias (Responsáveis Únicos)
+        # Criar base de famílias
         df_fam = df[df["NOME DO RESPONSÁVEL"] != "-"].drop_duplicates(subset=["NOME DO RESPONSÁVEL"]).copy()
         
-        # --- CÁLCULO DE VULNERABILIDADE (SISTEMA DE PONTOS) ---
-        def calcular_pontos(row):
-            pontos = 0
-            # Critério 1: Sem trabalho
-            if "NÃO" in str(row["EXERCE ATIVIDADE REMUNERADA:"]): pontos += 10
-            # Critério 2: Renda Baixa (Salário Mínimo ou Meio Salário)
-            if "DE R$ 606" in str(row["RENDA FAMILIAR TOTAL"]) or "ATÉ R$ 606" in str(row["RENDA FAMILIAR TOTAL"]): pontos += 15
-            # Critério 3: PCD (Participante ou Responsável)
-            if "SIM" in str(row["PESSOA COM DEFICIÊNCIA (RESPONSÁVEL)"]) or "SIM" in str(row["PCD (PARTICIPANTE)"]): pontos += 20
-            # Critério 4: Idoso (Responsável com 60 anos ou mais)
+        # Função de Pontuação conforme sua solicitação
+        def calcular_vulnerabilidade(row):
+            pts = 0
+            # 1. Trabalho (Peso Principal)
+            if "NÃO" in str(row["EXERCE ATIVIDADE REMUNERADA:"]): pts += 30
+            
+            # 2. Renda Familiar
+            if "DE R$ 606" in str(row["RENDA FAMILIAR TOTAL"]) or "ATÉ R$ 606" in str(row["RENDA FAMILIAR TOTAL"]): pts += 25
+            elif "DE R$ 607" in str(row["RENDA FAMILIAR TOTAL"]): pts += 15
+            
+            # 3. Número de pessoas no domicílio (Contagem direta na planilha geral)
+            membros = len(df[df["NOME DO RESPONSÁVEL"] == row["NOME DO RESPONSÁVEL"]])
+            pts += (membros * 5) # 5 pontos por pessoa na casa
+            
+            # 4. Idoso (Baseado na idade do responsável ou colunas de idoso)
             try:
-                idade_res = int(''.join(filter(str.isdigit, str(row["IDADE DO RESPONSÁVEL"]))))
-                if idade_res >= 60: pontos += 15
+                idade = int(''.join(filter(str.isdigit, str(row["IDADE DO RESPONSÁVEL"]))))
+                if idade >= 60: pts += 20
             except: pass
-            return pontos
+            
+            # 5. PcD (Pessoa com Deficiência)
+            if "SIM" in str(row["PESSOA COM DEFICIÊNCIA (RESPONSÁVEL)"]) or "SIM" in str(row["PCD (PARTICIPANTE)"]):
+                pts += 25
+                
+            return pts, membros
 
-        df_fam["PONTOS_RISCO"] = df_fam.apply(calcular_pontos, axis=1)
-        # Ordena: Mais vulneráveis no topo
-        df_fam = df_fam.sort_values(by="PONTOS_RISCO", ascending=False)
+        # Aplicar pontuação
+        resultados = df_fam.apply(calcular_vulnerabilidade, axis=1)
+        df_fam["PONTUACAO"], df_fam["QTD_MEMBROS"] = zip(*resultados)
+        
+        # Ordenar: Maior pontuação primeiro
+        df_fam = df_fam.sort_values(by="PONTUACAO", ascending=False)
         
         return df, df_fam
     except Exception as e:
-        st.error(f"Erro no processamento: {e}")
+        st.error(f"Erro ao processar: {e}")
         return None, None
 
-df_geral, df_fam = load_data()
+df_geral, df_fam = load_and_score_data()
 
 if df_geral is not None:
-    # --- 4. FILTROS NA LATERAL ---
-    st.sidebar.header("🔍 Critérios de Triagem")
-    f_trab = st.sidebar.multiselect("Status de Trabalho:", sorted(df_fam["EXERCE ATIVIDADE REMUNERADA:"].unique()), default=list(df_fam["EXERCE ATIVIDADE REMUNERADA:"].unique()))
-    f_renda = st.sidebar.multiselect("Faixa de Renda:", sorted(df_fam["RENDA FAMILIAR TOTAL"].unique()), default=list(df_fam["RENDA FAMILIAR TOTAL"].unique()))
+    # --- 4. FILTROS LATERAIS ---
+    st.sidebar.header("⚖️ Filtros de Prioridade")
+    f_trab = st.sidebar.multiselect("Trabalhando?", sorted(df_fam["EXERCE ATIVIDADE REMUNERADA:"].unique()), default=list(df_fam["EXERCE ATIVIDADE REMUNERADA:"].unique()))
+    f_renda = st.sidebar.multiselect("Renda?", sorted(df_fam["RENDA FAMILIAR TOTAL"].unique()), default=list(df_fam["RENDA FAMILIAR TOTAL"].unique()))
     
-    # Aplicar Filtros
     df_filtrado = df_fam[(df_fam["EXERCE ATIVIDADE REMUNERADA:"].isin(f_trab)) & (df_fam["RENDA FAMILIAR TOTAL"].isin(f_renda))]
 
-    # --- 5. CABEÇALHO ---
-    st.markdown('<div class="main-header"><h1>Painel de Vulnerabilidade Social CAS</h1></div>', unsafe_allow_html=True)
+    # --- 5. INTERFACE PRINCIPAL ---
+    st.markdown('<div class="main-header"><h1>Panorama de Vulnerabilidade CAS</h1></div>', unsafe_allow_html=True)
     
-    # --- 6. SELEÇÃO DE RESPONSÁVEL ---
-    # A lista já vem ordenada por quem tem mais pontos de risco
+    st.info("📊 A lista abaixo está organizada automaticamente: Quem mais precisa de atenção aparece primeiro.")
+    
+    # Dropdown de Nomes
     lista_nomes = df_filtrado["NOME DO RESPONSÁVEL"].tolist()
-    st.info(f"💡 A lista abaixo está ordenada por PRIORIDADE (Mais vulneráveis primeiro).")
-    selecionado = st.selectbox("🎯 Selecionar Família para Avaliação:", ["-- SELECIONE NA LISTA (ORDEM DE RISCO) --"] + lista_nomes)
+    selecionado = st.selectbox("🎯 Selecionar Família (Ordenada por Risco):", ["-- SELECIONE --"] + lista_nomes)
 
-    # --- 7. PRONTUÁRIO COM ALERTAS ---
-    if selecionado != "-- SELECIONE NA LISTA (ORDEM DE RISCO) --":
+    if selecionado != "-- SELECIONE --":
         st.divider()
-        dados_familia = df_geral[df_geral["NOME DO RESPONSÁVEL"] == selecionado]
-        principal = dados_familia.iloc[0]
-        pontos = df_fam[df_fam["NOME DO RESPONSÁVEL"] == selecionado]["PONTOS_RISCO"].values[0]
-
-        # MENSAGEM DE ALERTA DINÂMICA
-        if pontos >= 20:
-            alertas = []
-            if "NÃO" in principal["EXERCE ATIVIDADE REMUNERADA:"]: alertas.append("SEM ATIVIDADE REMUNERADA")
-            if "SIM" in principal["PESSOA COM DEFICIÊNCIA (RESPONSÁVEL)"] or "SIM" in principal["PCD (PARTICIPANTE)"]: alertas.append("PRESENÇA DE PcD")
-            if "ATÉ R$ 606" in principal["RENDA FAMILIAR TOTAL"]: alertas.append("RENDA CRÍTICA")
+        
+        # Coleta dados para o Alerta
+        dados_f = df_geral[df_geral["NOME DO RESPONSÁVEL"] == selecionado]
+        resumo = df_fam[df_fam["NOME DO RESPONSÁVEL"] == selecionado].iloc[0]
+        
+        # MENSAGEM DE ALERTA DE VULNERABILIDADE
+        if resumo["PONTUACAO"] > 40:
+            motivos = []
+            if "NÃO" in resumo["EXERCE ATIVIDADE REMUNERADA:"]: motivos.append("Desemprego")
+            if resumo["QTD_MEMBROS"] > 3: motivos.append(f"Família Numerosa ({resumo['QTD_MEMBROS']} pessoas)")
+            if "SIM" in str(resumo["PESSOA COM DEFICIÊNCIA (RESPONSÁVEL)"]): motivos.append("Presença de PcD")
             
             st.markdown(f"""
-                <div class="status-vulneravel">
-                    🚨 ALERTA DE ALTA VULNERABILIDADE (Pontuação: {pontos})<br>
-                    <small>Fatores de Risco: {', '.join(alertas)}</small>
+                <div class="status-alerta-critico">
+                    🚨 ATENÇÃO: Família em Alta Vulnerabilidade!<br>
+                    <span style='font-size:0.9rem; font-weight:normal;'>
+                    Pontuação de Risco: {resumo['PONTUACAO']} | Fatores detectados: {', '.join(motivos)}
+                    </span>
                 </div>
             """, unsafe_allow_html=True)
 
-        st.subheader(f"🏠 Ficha de Atendimento: {selecionado}")
-        
-        # Grid de Detalhes
+        # Exibição do Prontuário
+        st.subheader(f"🏠 Ficha: {selecionado}")
         grid = st.columns(4)
         for i, col in enumerate(df_geral.columns):
             with grid[i % 4]:
                 st.markdown(f'''<div class="info-card">
                     <div class="label-title">{col}</div>
-                    <div class="value-text">{principal[col]}</div>
+                    <div class="value-text">{dados_f.iloc[0][col]}</div>
                 </div>''', unsafe_allow_html=True)
 
         st.write("---")
-        st.write(f"### 👨‍👩‍👧‍👦 Integrantes no CAS ({len(dados_familia)})")
-        st.table(dados_familia[["NOME DO PARTICIPANTE (ATIVIDADES)", "ATIVIDADE DESEJADA", "TURNO", "IDADE (PARTICIPANTE)"]])
+        st.write(f"### 👨‍👩‍👧‍👦 Pessoas no Domicílio ({len(dados_f)})")
+        st.table(dados_f[["NOME DO PARTICIPANTE (ATIVIDADES)", "ATIVIDADE DESEJADA", "IDADE (PARTICIPANTE)"]])
 
-    # --- 8. EXPORTAÇÃO ---
+    # --- 6. EXPORTAÇÃO ---
     st.sidebar.write("---")
-    if st.sidebar.button("➕ Adicionar aos Favoritos"):
-        if selecionado != "-- SELECIONE NA LISTA (ORDEM DE RISCO) --":
+    if st.sidebar.button("🚀 Adicionar à Lista de Urgência"):
+        if selecionado != "-- SELECIONE --":
             if selecionado not in st.session_state.lista_exportacao:
                 st.session_state.lista_exportacao.append(selecionado)
                 st.rerun()
 
     if st.session_state.lista_exportacao:
-        st.sidebar.write(f"Selecionados: {len(st.session_state.lista_exportacao)}")
-        if st.sidebar.button("📥 Gerar Planilha de Urgência"):
+        st.sidebar.write(f"Na lista: {len(st.session_state.lista_exportacao)}")
+        if st.sidebar.button("📥 Baixar Excel de Urgência"):
             df_exp = df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(st.session_state.lista_exportacao)]
             buf = BytesIO()
             with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
                 df_exp.to_excel(writer, index=False)
-            st.sidebar.download_button("Clique para Baixar", buf.getvalue(), "Urgencia_Social.xlsx")
+            st.sidebar.download_button("Clique aqui para salvar", buf.getvalue(), "Urgencia_Social.xlsx")
 else:
-    st.error("Planilha 'Planilha Matriculados' não encontrada.")
+    st.warning("Verifique se o arquivo 'Planilha Matriculados' está na pasta.")
