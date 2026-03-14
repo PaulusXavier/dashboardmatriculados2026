@@ -6,10 +6,11 @@ from io import BytesIO
 # 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="Socioeconômico Famílias CAS", layout="wide", page_icon="🏠")
 
+# Inicializa lista de exportação se não existir
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
 
-# --- 2. CSS CUSTOMIZADO ---
+# --- 2. CSS PARA DESIGN DE PRONTUÁRIO SOCIAL ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
@@ -31,113 +32,130 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO E LIMPEZA (SUBSTITUINDO NAN POR TRAÇO) ---
+# --- 3. PROCESSAMENTO DE DADOS (LÓGICA UNIFICADA) ---
 @st.cache_data
-def load_data():
+def load_and_clean_data():
+    # Busca por arquivos Excel ou CSV na pasta
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
-    if not arquivos: return None
+    if not arquivos:
+        return None, None
+    
     path = arquivos[0]
     try:
-        df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
+        # Carrega os dados
+        if path.endswith('.csv'):
+            df = pd.read_csv(path, dtype=str)
+        else:
+            df = pd.read_excel(path, dtype=str)
         
-        # Limpar nomes das colunas
+        # Padroniza nomes das colunas (Maiúsculas e sem espaços)
         df.columns = [str(c).strip().upper() for c in df.columns]
         
-        # Limpeza de dados: remove espaços e substitui vazios/nan por "-"
+        # Limpeza Geral: Remove espaços e troca vazios/NaN por "-"
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
             df[col] = df[col].replace(['NAN', 'NONE', '', ' ', 'NULL'], '-')
         
-        # Base de Responsáveis Únicos (FAMÍLIAS)
-        # Filtramos para ignorar linhas onde o responsável é apenas um traço
-        df_unicos = df[df["NOME DO RESPONSÁVEL"] != "-"].drop_duplicates(subset=["NOME DO RESPONSÁVEL"])
+        # CRIAÇÃO DA BASE DE FAMÍLIAS (292 Responsáveis Únicos)
+        # Removemos duplicatas para ter 1 linha por família nas estatísticas e filtros
+        df_familias = df[df["NOME DO RESPONSÁVEL"] != "-"].drop_duplicates(subset=["NOME DO RESPONSÁVEL"])
         
-        return df, df_unicos
+        return df, df_familias
     except Exception as e:
-        st.error(f"Erro ao carregar os dados: {e}")
+        st.error(f"Erro ao processar a planilha: {e}")
         return None, None
 
-df_geral, df_unicos = load_data()
+df_geral, df_familias = load_and_clean_data()
 
 if df_geral is not None:
-    # --- 4. FILTROS LATERAIS ---
-    st.sidebar.header("🔍 Filtros de Vulnerabilidade")
+    # --- 4. BARRA LATERAL: FILTROS DE VULNERABILIDADE ---
+    st.sidebar.header("🔍 Triagem Socioeconômica")
     
+    # Identificando colunas chave (ajustado para bater com sua planilha)
     col_trab = "EXERCE ATIVIDADE REMUNERADA:"
     col_renda = "RENDA FAMILIAR TOTAL"
-    col_benef = "A FAMÍLIA RECEBE ALGUM TIPO DE BENEFÍCIO"
+    col_benef = [c for c in df_geral.columns if "BENEFÍCIO" in c][0] # Busca dinâmica
 
-    f_trab = st.sidebar.multiselect("Trabalha?", sorted(list(df_unicos[col_trab].unique())), default=list(df_unicos[col_trab].unique()))
-    f_renda = st.sidebar.multiselect("Renda:", sorted(list(df_unicos[col_renda].unique())), default=list(df_unicos[col_renda].unique()))
-    
-    # Busca pela coluna de benefício (ajustando para possíveis espaços no nome da coluna)
-    col_benef_real = [c for c in df_geral.columns if "A FAMÍLIA RECEBE ALGUM TIPO DE BENEFÍCIO" in c][0]
-    f_benef = st.sidebar.multiselect("Benefício?", sorted(list(df_unicos[col_benef_real].unique())), default=list(df_unicos[col_benef_real].unique()))
+    f_trab = st.sidebar.multiselect("Trabalha?", sorted(df_familias[col_trab].unique()), default=list(df_familias[col_trab].unique()))
+    f_renda = st.sidebar.multiselect("Renda Familiar:", sorted(df_familias[col_renda].unique()), default=list(df_familias[col_renda].unique()))
+    f_benef = st.sidebar.multiselect("Recebe Benefício?", sorted(df_familias[col_benef].unique()), default=list(df_familias[col_benef].unique()))
 
-    # Aplicação dos filtros na base de famílias
-    df_filtrado = df_unicos[
-        (df_unicos[col_trab].isin(f_trab)) & 
-        (df_unicos[col_renda].isin(f_renda)) &
-        (df_unicos[col_benef_real].isin(f_benef))
+    # Aplicação do Filtro
+    df_filtrado = df_familias[
+        (df_familias[col_trab].isin(f_trab)) & 
+        (df_familias[col_renda].isin(f_renda)) &
+        (df_familias[col_benef].isin(f_benef))
     ].copy()
 
-    # Ordenação: Quem não trabalha e não tem benefício fica no topo
-    df_filtrado['VULN'] = df_filtrado.apply(lambda r: 0 if "NÃO" in r[col_trab] and "NÃO" in r[col_benef_real] else 1, axis=1)
-    df_filtrado = df_filtrado.sort_values('VULN')
+    # Lógica de Vulnerabilidade: Quem está "NÃO" em trabalho e "NÃO" em benefício vai para o topo
+    def calcular_risco(row):
+        if "NÃO" in str(row[col_trab]) and "NÃO" in str(row[col_benef]):
+            return 0 # Risco Alto
+        return 1
 
-    # --- 5. INTERFACE PRINCIPAL ---
+    df_filtrado['ORDEM_RISCO'] = df_filtrado.apply(calcular_risco, axis=1)
+    df_filtrado = df_filtrado.sort_values('ORDEM_RISCO')
+
+    # --- 5. CABEÇALHO E MÉTRICAS ---
     st.markdown('<div class="main-header"><h1>Socioeconômico Famílias CAS</h1></div>', unsafe_allow_html=True)
     
-    c1, c2 = st.columns(2)
-    # Exibe o número de famílias filtradas (ex: 222)
-    c1.metric("Unidades Familiares", len(df_filtrado))
-    c2.metric("Matrículas Totais no Grupo", len(df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(df_filtrado["NOME DO RESPONSÁVEL"])]))
+    m1, m2 = st.columns(2)
+    m1.metric("Unidades Familiares (Responsáveis)", len(df_filtrado))
+    m2.metric("Matrículas Vinculadas ao Grupo", len(df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(df_filtrado["NOME DO RESPONSÁVEL"])]))
 
-    lista_nomes = [n for n in df_filtrado["NOME DO RESPONSÁVEL"].tolist() if n != "-"]
-    selecionado = st.selectbox("🎯 Escolha um Responsável para Ver a Ficha Completa:", ["SELECIONE..."] + lista_nomes)
+    # Seleção do Responsável
+    lista_final_nomes = [n for n in df_filtrado["NOME DO RESPONSÁVEL"].tolist() if n != "-"]
+    selecionado = st.selectbox("🎯 Selecione o Responsável para Prontuário Social:", ["-- SELECIONE UM NOME NA LISTA --"] + lista_final_nomes)
 
-    # --- 6. PRONTUÁRIO DETALHADO ---
-    if selecionado != "SELECIONE...":
+    # --- 6. PRONTUÁRIO SOCIAL DETALHADO ---
+    if selecionado != "-- SELECIONE UM NOME NA LISTA --":
         st.write("---")
+        
+        # Dados da Família
         familia_data = df_geral[df_geral["NOME DO RESPONSÁVEL"] == selecionado]
         dados_base = familia_data.iloc[0]
 
-        # Alerta de Vulnerabilidade
-        if "NÃO" in dados_base[col_trab] and "NÃO" in dados_base[col_benef_real]:
-            st.markdown(f'<div class="status-alerta">⚠️ ALERTA: Responsável sem ocupação remunerada e sem benefícios sociais registrados.</div>', unsafe_allow_html=True)
+        # Alerta visual de Risco
+        if "NÃO" in dados_base[col_trab] and "NÃO" in dados_base[col_benef]:
+            st.markdown(f'<div class="status-alerta">🚨 ALERTA SOCIAL: Família sem atividade remunerada e sem benefícios. Prioridade de Atendimento.</div>', unsafe_allow_html=True)
 
-        ctit, cbtn = st.columns([3, 1])
-        ctit.subheader(f"🏠 Prontuário Social: {selecionado}")
+        c_tit, c_exp = st.columns([3, 1])
+        c_tit.subheader(f"🏠 Unidade Familiar: {selecionado}")
         
-        if cbtn.button("➕ Adicionar para Exportação"):
+        if c_exp.button("🚀 Adicionar à Lista de Exportação"):
             if selecionado not in st.session_state.lista_exportacao:
                 st.session_state.lista_exportacao.append(selecionado)
                 st.rerun()
 
-        st.write("### 📄 Dados de Cadastro (Raio-X)")
-        grid = st.columns(4)
-        for i, coluna in enumerate(df_geral.columns.tolist()):
-            with grid[i % 4]:
+        # GRID DE DADOS (RAIO-X DE TODAS AS COLUNAS)
+        st.write("### 📖 Cadastro Socioeconômico Completo")
+        cols_grid = st.columns(4)
+        for i, nome_col in enumerate(df_geral.columns):
+            with cols_grid[i % 4]:
                 st.markdown(f'''<div class="info-card">
-                    <div class="label-title">{coluna}</div>
-                    <div class="value-text">{dados_base[coluna]}</div>
+                    <div class="label-title">{nome_col}</div>
+                    <div class="value-text">{dados_base[nome_col]}</div>
                 </div>''', unsafe_allow_html=True)
 
-        st.write("---")
-        st.write(f"### 👨‍👩‍👧‍👦 Membros Matriculados ({len(familia_data)})")
+        # TABELA DE DEPENDENTES
+        st.write(f"### 👨‍👩‍👧‍👦 Participantes Matriculados nesta Família ({len(familia_data)})")
         st.table(familia_data[["NOME DO PARTICIPANTE (ATIVIDADES)", "IDADE (PARTICIPANTE)", "ATIVIDADE DESEJADA", "TURNO"]])
 
-    # --- 7. EXPORTAÇÃO ---
+    # --- 7. SISTEMA DE EXPORTAÇÃO ---
     if st.session_state.lista_exportacao:
         st.sidebar.write("---")
-        st.sidebar.subheader("📦 Exportar Selecionados")
-        df_exp = df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(st.session_state.lista_exportacao)]
-        buf = BytesIO()
-        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-            df_exp.to_excel(writer, index=False)
-        st.sidebar.download_button("📥 Baixar Excel", buf.getvalue(), "Relatorio_Familias_Selecionadas.xlsx", use_container_width=True)
-        if st.sidebar.button("🗑️ Limpar Lista"):
+        st.sidebar.subheader("📦 Relatório Gerado")
+        df_saida = df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(st.session_state.lista_exportacao)]
+        
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df_saida.to_excel(writer, index=False, sheet_name='Familias_CAS')
+        
+        st.sidebar.download_button("📥 Baixar Excel das Selecionadas", output.getvalue(), "Relatorio_CAS_Socioeconomico.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        
+        if st.sidebar.button("🗑️ Limpar Lista de Seleção"):
             st.session_state.lista_exportacao = []
             st.rerun()
+
 else:
-    st.info("Aguardando carregamento da planilha...")
+    st.warning("⚠️ Planilha não encontrada. Certifique-se de que o arquivo 'Planilha Matriculados' está na mesma pasta do código.")
