@@ -5,172 +5,120 @@ import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="CAS | Inteligência Social", layout="wide", page_icon="🧠")
+st.set_page_config(page_title="CAS | Sistema de Inteligência Social", layout="wide", page_icon="🧠")
 
-# Inicialização da lista de exportação
-if 'lista_exportacao' not in st.session_state:
-    st.session_state.lista_exportacao = []
-
-# --- 2. CSS DESIGN PREMIUM ---
+# --- 2. CSS PARA DESIGN PREMIUM ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
     html, body, [class*="css"] { font-family: 'Sora', sans-serif; background-color: #f8fafc; }
     .main-header {
         background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
-        padding: 40px; border-radius: 20px; color: white; text-align: center;
-        margin-bottom: 25px; box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        padding: 30px; border-radius: 20px; color: white; text-align: center; margin-bottom: 20px;
     }
-    .kpi-box {
-        background: white; padding: 20px; border-radius: 15px;
-        text-align: center; border: 1px solid #e2e8f0;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-    }
-    .kpi-title { color: #64748b; font-size: 11px; font-weight: 800; text-transform: uppercase; }
-    .kpi-value { color: #1e3a8a; font-size: 28px; font-weight: 800; }
-    .data-grid-item {
-        background: white; padding: 12px; border-radius: 10px;
-        border: 1px solid #e2e8f0; margin-bottom: 8px; transition: 0.3s;
-    }
-    .data-grid-item:hover { border-color: #3b82f6; box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
-    .label-grid { color: #94a3b8; font-size: 9px; font-weight: 800; text-transform: uppercase; }
-    .value-grid { color: #1e293b; font-size: 12px; font-weight: 700; }
+    .kpi-container { background: #ffffff; padding: 20px; border-radius: 15px; border: 1px solid #e2e8f0; text-align: center; }
+    .data-card { background: white; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 10px; }
+    .label-card { color: #94a3b8; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; }
+    .value-card { color: #1e293b; font-size: 0.85rem; font-weight: 700; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. FUNÇÃO PARA EVITAR KEYERROR (Busca Inteligente) ---
-def get_col(df, keywords):
-    """Busca uma coluna que contenha as palavras-chave, ignorando maiúsculas e espaços."""
-    for col in df.columns:
-        if any(kw.upper() in col.upper() for kw in keywords):
-            return col
-    return None
-
-# --- 4. CARREGAMENTO DOS DADOS ---
+# --- 3. CARREGAMENTO DOS DADOS (BLINDADO) ---
 @st.cache_data
 def load_data():
-    # Tenta carregar o CSV que você subiu ou o Excel do OneDrive
-    arquivos_locais = [f for f in os.listdir('.') if 'Planilha Matriculados' in f]
-    path_onedrive = r"C:\Users\paulo\OneDrive\Documentos\CAS\Planilha Matriculados\Planilha Matriculados.xlsx"
-    
+    arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
+    if not arquivos: return None
+    path = arquivos[0]
     try:
-        if arquivos_locais:
-            nome_arq = arquivos_locais[0]
-            df = pd.read_csv(nome_arq, dtype=str) if nome_arq.endswith('.csv') else pd.read_excel(nome_arq, dtype=str)
-        elif os.path.exists(path_onedrive):
-            df = pd.read_excel(path_onedrive, dtype=str)
-        else:
-            return None
-        
-        # Limpeza básica: remove espaços extras dos nomes das colunas
+        df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
         df.columns = [str(c).strip() for c in df.columns]
-        return df.fillna("—").replace("nan", "—")
+        return df.fillna("Não Informado").replace("nan", "Não Informado")
     except Exception as e:
-        st.error(f"Erro ao ler arquivo: {e}")
+        st.error(f"Erro ao carregar arquivo: {e}")
         return None
 
 df_base = load_data()
 
 if df_base is not None:
-    # MAPEAMENTO DINÂMICO (Resolve o KeyError)
-    C_PARTICIPANTE = get_col(df_base, ["NOME DO PARTICIPANTE"])
-    C_RESPONSAVEL = get_col(df_base, ["NOME DO RESPONSÁVEL"])
-    C_RENDA = get_col(df_base, ["RENDA FAMILIAR TOTAL", "RENDA FAMILIAR MENSAL"])
-    C_TRAMPO = get_col(df_base, ["EXERCE ATIVIDADE REMUNERADA"])
-    C_MORADIA = get_col(df_base, ["SITUAÇÃO DE MORADIA"])
-    C_BAIRRO = get_col(df_base, ["BAIRRO"])
-    C_ATIVIDADE = get_col(df_base, ["ATIVIDADE DESEJADA"])
-
-    # Verificação de colunas críticas
-    if not C_RESPONSAVEL or not C_RENDA:
-        st.error("Não foi possível identificar as colunas principais. Verifique os títulos da sua planilha.")
-        st.stop()
-
-    # Processamento para métricas de Vulnerabilidade (Agrupado por Família)
-    df_familias = df_base[df_base[C_RESPONSAVEL] != "—"].drop_duplicates(subset=[C_RESPONSAVEL])
+    # MAPEAMENTO POR ÍNDICE (Letras para Números)
+    # A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9, K=10, L=11, M=12, N=13...
+    # R=17, S=18, T=19, U=20, V=21, W=22, X=23, Y=24... AB=27, AC=28, AD=29, AE=30, AF=31, AG=32, AH=33... AL=37
     
-    # --- 5. SIDEBAR (FILTROS) ---
-    st.sidebar.header("🛡️ Filtros de Vulnerabilidade")
+    COL_RESPONSAVEL = df_base.columns[16] # Coluna Q (Aproximada para Nome do Responsável)
+    COL_TRAMPO = df_base.columns[25]      # Coluna Z (Exerce atividade remunerada)
+    COL_RENDA = df_base.columns[26]       # Coluna AA (Renda familiar)
     
-    opcoes_trampo = sorted(df_base[C_TRAMPO].unique())
-    f_trampo = st.sidebar.multiselect("Trabalha?", opcoes_trampo, default=opcoes_trampo)
+    # Índices das colunas para os gráficos solicitados
+    indices_graficos = [1, 2, 4, 6, 7, 9, 10, 11, 13, 17, 18, 19, 20, 21, 23, 24, 27, 28, 29, 31, 33, 37]
+
+    # --- 4. CABEÇALHO E FILTROS (TOPO DA PÁGINA) ---
+    st.markdown('<div class="main-header"><h1>Painel de Vulnerabilidade CAS 2026</h1></div>', unsafe_allow_html=True)
     
-    opcoes_renda = sorted(df_base[C_RENDA].unique())
-    f_renda = st.sidebar.multiselect("Faixa de Renda:", opcoes_renda, default=opcoes_renda)
+    with st.container():
+        f1, f2, f3 = st.columns([1, 1, 2])
+        with f1:
+            opcoes_trampo = sorted(df_base[COL_TRAMPO].unique())
+            filtro_trampo = st.multiselect("🛠️ Trabalha?", opcoes_trampo, default=opcoes_trampo)
+        with f2:
+            opcoes_renda = sorted(df_base[COL_RENDA].unique())
+            filtro_renda = st.multiselect("💰 Faixa de Renda:", opcoes_renda, default=opcoes_renda)
+        
+        # Aplicação dos filtros antes da busca por responsável
+        df_filtrado = df_base[df_base[COL_TRAMPO].isin(filtro_trampo) & df_base[COL_RENDA].isin(filtro_renda)]
+        
+        with f3:
+            lista_responsaveis = sorted(df_filtrado[COL_RESPONSAVEL].unique())
+            selecionado = st.selectbox("🔍 Pesquisar Responsável Familiar:", ["Selecione..."] + lista_responsaveis)
 
-    # Aplicação dos Filtros
-    df_filtrado_geral = df_base[df_base[C_TRAMPO].isin(f_trampo) & df_base[C_RENDA].isin(f_renda)]
-    df_filtrado_familias = df_familias[df_familias[C_TRAMPO].isin(f_trampo) & df_familias[C_RENDA].isin(f_renda)]
-
-    # --- 6. DASHBOARD ---
-    st.markdown('<div class="main-header"><h1>CAS | Inteligência Social</h1><p>Monitoramento de Vulnerabilidade Familiar</p></div>', unsafe_allow_html=True)
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Participantes</div><div class="kpi-value">{len(df_filtrado_geral)}</div></div>', unsafe_allow_html=True)
-    m2.markdown(f'<div class="kpi-box"><div class="kpi-title">🏠 Famílias</div><div class="kpi-value">{len(df_filtrado_familias)}</div></div>', unsafe_allow_html=True)
-    
-    # Cálculo de desempregados (baseado na coluna de atividade remunerada)
-    sem_trampo = df_filtrado_familias[df_filtrado_familias[C_TRAMPO].str.contains("NÃO", case=False, na=False)].shape[0]
-    m3.markdown(f'<div class="kpi-box"><div class="kpi-title">🚫 Responsável S/ Trabalho</div><div class="kpi-value">{sem_trampo}</div></div>', unsafe_allow_html=True)
-    m4.markdown(f'<div class="kpi-box"><div class="kpi-title">📥 Exportar</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
-
-    st.write("---")
-    
-    # Gráficos
-    g1, g2 = st.columns(2)
-    with g1:
-        st.subheader("📊 Distribuição de Renda")
-        fig_renda = px.bar(df_filtrado_familias[C_RENDA].value_counts().reset_index(), 
-                           x=C_RENDA, y='count', color=C_RENDA, color_discrete_sequence=px.colors.qualitative.Prism)
-        st.plotly_chart(fig_renda, use_container_width=True)
-    
-    with g2:
-        st.subheader("💼 Status de Emprego (Chefes de Família)")
-        fig_pie = px.pie(df_filtrado_familias, names=C_TRAMPO, hole=0.4, color_discrete_sequence=["#ef4444", "#10b981"])
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-    # --- 7. BUSCA INDIVIDUAL ---
-    st.write("---")
-    selecionado = st.selectbox("🔍 Detalhar Família (Pesquisar Responsável):", ["Selecione..."] + sorted(df_filtrado_familias[C_RESPONSAVEL].tolist()))
-
+    # --- 5. FICHA TÉCNICA (CENTRO) ---
     if selecionado != "Selecione...":
-        chefe = df_filtrado_familias[df_filtrado_familias[C_RESPONSAVEL] == selecionado].iloc[0]
-        membros = df_base[df_base[C_RESPONSAVEL] == selecionado]
-
-        col_tit, col_btn = st.columns([3, 1])
-        col_tit.subheader(f"Prontuário: {selecionado}")
+        st.write("---")
+        chefe = df_filtrado[df_filtrado[COL_RESPONSAVEL] == selecionado].iloc[0]
+        st.subheader(f"📄 Prontuário Familiar: {selecionado}")
         
-        if selecionado not in st.session_state.lista_exportacao:
-            if col_btn.button("➕ Adicionar para Relatório"):
-                st.session_state.lista_exportacao.append(selecionado)
-                st.rerun()
-        else:
-            if col_btn.button("✅ Na Lista (Remover?)"):
-                st.session_state.lista_exportacao.remove(selecionado)
-                st.rerun()
-
-        # Grid de Detalhes
-        with st.expander("📄 Ver Ficha Socioeconômica Completa", expanded=True):
-            grid_cols = st.columns(4)
-            for i, coluna in enumerate(df_base.columns):
-                with grid_cols[i % 4]:
-                    st.markdown(f'<div class="data-grid-item"><div class="label-grid">{coluna}</div><div class="value-grid">{chefe[coluna]}</div></div>', unsafe_allow_html=True)
-
-        st.markdown(f"#### 👨‍👩‍👧‍👦 Membros da Família Matriculados ({len(membros)})")
-        st.table(membros[[C_PARTICIPANTE, C_ATIVIDADE, "IDADE (PARTICIPANTE)"]])
-
-    # --- 8. EXPORTAÇÃO ---
-    if st.session_state.lista_exportacao:
-        st.sidebar.write("---")
-        if st.sidebar.button("🗑️ Limpar Lista"):
-            st.session_state.lista_exportacao = []
-            st.rerun()
+        # Mostrar todas as colunas da família em um grid
+        exp_cols = st.columns(4)
+        for i, col_name in enumerate(df_base.columns):
+            with exp_cols[i % 4]:
+                st.markdown(f'''<div class="data-card">
+                    <div class="label-card">{col_name}</div>
+                    <div class="value-card">{chefe[col_name]}</div>
+                </div>''', unsafe_allow_html=True)
         
-        df_exp = df_base[df_base[C_RESPONSAVEL].isin(st.session_state.lista_exportacao)]
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_exp.to_excel(writer, index=False)
-        st.sidebar.download_button("🚀 Baixar Relatório das Famílias", output.getvalue(), "Relatorio_CAS.xlsx", use_container_width=True)
+        st.markdown(f"**Membros da Família:** {len(df_base[df_base[COL_RESPONSAVEL] == selecionado])} pessoa(s) matriculada(s).")
+
+    # --- 6. GRÁFICOS ANALÍTICOS (FINAL DA PÁGINA) ---
+    st.write("---")
+    st.subheader("📊 Diagnóstico Social (Colunas Selecionadas)")
+    st.info("Os gráficos abaixo refletem os filtros de Emprego e Renda aplicados no topo.")
+
+    # Criar grid de gráficos (2 por linha)
+    g_cols = st.columns(2)
+    
+    # Filtrar apenas colunas que existem no arquivo para evitar erros de índice
+    colunas_graficos = [df_base.columns[i] for i in indices_graficos if i < len(df_base.columns)]
+
+    for idx, col_nome in enumerate(colunas_graficos):
+        with g_cols[idx % 2]:
+            # Contagem de dados
+            dados_grafico = df_filtrado[col_nome].value_counts().reset_index()
+            dados_grafico.columns = [col_nome, 'Frequência']
+            
+            # Limitar para não poluir
+            if len(dados_grafico) > 10:
+                dados_grafico = dados_grafico.head(10)
+
+            fig = px.bar(
+                dados_grafico, 
+                y=col_nome, 
+                x='Frequência', 
+                orientation='h',
+                title=f"Distribuição: {col_nome}",
+                color='Frequência',
+                color_continuous_scale='Blues'
+            )
+            fig.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.error("Arquivo 'Planilha Matriculados' não encontrado. Verifique se o arquivo está na mesma pasta do script.")
+    st.error("Planilha não detectada. Verifique o nome do arquivo.")
