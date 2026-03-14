@@ -1,17 +1,16 @@
 import streamlit as st
-import pd
 import pandas as pd
 import plotly.express as px
 import os
 from io import BytesIO
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="CAS | Sistema de Inteligência Social", layout="wide", page_icon="📊")
+st.set_page_config(page_title="CAS | Inteligência Social", layout="wide", page_icon="📊")
 
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
 
-# --- 2. CSS DE ALTO CONTRASTE PARA APRESENTAÇÃO ---
+# --- 2. CSS DE ALTO CONTRASTE ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&display=swap');
@@ -29,46 +28,47 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO E LIMPEZA RIGOROSA (REVISÃO TOTAL) ---
+# --- 3. CARREGAMENTO E LIMPEZA (REVISÃO TOTAL DOS GRÁFICOS) ---
 @st.cache_data
 def load_and_clean_data():
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
     if not arquivos: return None
     path = arquivos[0]
     try:
+        # Carrega os dados garantindo que tudo seja lido como texto inicialmente
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
         df.columns = [str(c).strip().replace('\n', ' ').upper() for c in df.columns]
         
-        # LIMPEZA DOS DADOS PARA GRÁFICOS PRECISOS
+        # LIMPEZA RIGOROSA: Resolve Turnos (Noturno/Tarde) e categorias duplicadas
         for col in df.columns:
-            # Remove espaços múltiplos e converte para maiúsculas
-            df[col] = df[col].astype(str).str.strip().str.upper()
-            # Unifica nulos
+            # Remove espaços no início/fim e espaços duplos no meio
+            df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip().str.upper()
+            # Unifica valores vazios ou erros de leitura
             df[col] = df[col].replace(['NAN', 'NONE', '', ' '], 'NÃO INFORMADO')
         return df
     except Exception as e:
-        st.error(f"Erro ao processar: {e}")
+        st.error(f"Erro ao processar arquivo: {e}")
         return None
 
 df_base = load_and_clean_data()
 
 if df_base is not None:
-    # DEFINIÇÃO DE COLUNAS CHAVE
+    # Nomes exatos das colunas conforme sua planilha
     COL_PARTICIPANTE = "NOME DO PARTICIPANTE (ATIVIDADES)"
     COL_RESPONSAVEL = "NOME DO RESPONSÁVEL"
     COL_TRAMPO = "EXERCE ATIVIDADE REMUNERADA:"
     COL_RENDA = "RENDA FAMILIAR TOTAL"
     
-    # Índices das 22 colunas estratégicas
+    # Índices das 22 colunas solicitadas
     idx_alvo = [1, 2, 4, 6, 7, 9, 10, 11, 13, 17, 18, 19, 20, 21, 23, 24, 27, 28, 29, 31, 33, 37]
 
-    # --- 4. CONTADORES REVISADOS (PRECISÃO DO NÚMERO DE FAMÍLIAS) ---
-    # Para o congresso, vamos considerar cada linha preenchida como um atendimento familiar
+    # --- 4. CONTADORES (RECUPERAÇÃO DOS 292 REGISTROS) ---
+    # Contamos cada linha que tem um responsável como uma unidade de atendimento familiar
     df_familias_validas = df_base[df_base[COL_RESPONSAVEL] != "NÃO INFORMADO"]
-    total_familias = len(df_familias_validas) # Voltando para o número real de linhas (aprox 292)
+    total_familias = len(df_familias_validas) 
     total_participantes = len(df_base[df_base[COL_PARTICIPANTE] != "NÃO INFORMADO"])
 
-    st.markdown('<div class="main-header"><h1>Painel de Inteligência Social | CAS</h1><p>Dados Unificados para Auditoria Técnica</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header"><h1>Painel de Inteligência Social | CAS</h1><p>Congresso 2026 - Auditoria e Diagnóstico</p></div>', unsafe_allow_html=True)
     
     k1, k2, k3 = st.columns(3)
     with k1:
@@ -76,35 +76,35 @@ if df_base is not None:
     with k2:
         st.markdown(f'<div class="kpi-box"><div class="kpi-title">👥 Total de Participantes</div><div class="kpi-value">{total_participantes}</div></div>', unsafe_allow_html=True)
     with k3:
-        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📋 Selecionados para Exportar</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi-box"><div class="kpi-title">📋 Lista de Exportação</div><div class="kpi-value">{len(st.session_state.lista_exportacao)}</div></div>', unsafe_allow_html=True)
 
-    # --- 5. FILTROS E BUSCA POR RESPONSÁVEL ---
+    # --- 5. FILTROS ---
     st.write("---")
     f1, f2, f3 = st.columns([1, 1, 2])
     with f1:
         op_t = sorted(df_base[COL_TRAMPO].unique())
-        sel_t = st.multiselect("Filtro: Atividade Remunerada", op_t, default=op_t)
+        sel_t = st.multiselect("Trabalho Remunerado", op_t, default=op_t)
     with f2:
         op_r = sorted(df_base[COL_RENDA].unique())
-        sel_r = st.multiselect("Filtro: Renda Familiar", op_r, default=op_r)
+        sel_r = st.multiselect("Renda Familiar", op_r, default=op_r)
     
     df_f = df_familias_validas[(df_familias_validas[COL_TRAMPO].isin(sel_t)) & (df_familias_validas[COL_RENDA].isin(sel_r))]
     
     with f3:
-        # CORREÇÃO DO TYPEERROR: Forçando string antes do sorted
-        nomes_para_lista = sorted([str(n) for n in df_f[COL_RESPONSAVEL].unique()])
-        selecionado = st.selectbox("🎯 Localizar Responsável Familiar:", ["SELECIONE UM NOME..."] + nomes_para_lista)
+        # Resolve o TypeError garantindo que tudo seja String antes de ordenar
+        nomes_limpos = sorted([str(n) for n in df_f[COL_RESPONSAVEL].unique()])
+        selecionado = st.selectbox("🎯 Selecionar Responsável:", ["SELECIONE..."] + nomes_limpos)
 
-    # --- 6. FICHA TÉCNICA E SELEÇÃO ---
-    if selecionado != "SELECIONE UM NOME...":
+    # --- 6. FICHA E EXPORTAÇÃO ---
+    if selecionado != "SELECIONE...":
         st.write("---")
         dados_f = df_f[df_f[COL_RESPONSAVEL] == selecionado].iloc[0]
         
         c_t, c_b = st.columns([3, 1])
-        c_t.subheader(f"📄 Prontuário: {selecionado}")
+        c_t.subheader(f"📂 Prontuário: {selecionado}")
         
         if selecionado not in st.session_state.lista_exportacao:
-            if c_b.button("➕ Adicionar à Lista de Exportação"):
+            if c_b.button("➕ Adicionar para Relatório"):
                 st.session_state.lista_exportacao.append(selecionado)
                 st.rerun()
         else:
@@ -112,7 +112,7 @@ if df_base is not None:
                 st.session_state.lista_exportacao.remove(selecionado)
                 st.rerun()
 
-        with st.expander("👁️ Ver Dados Completos da Unidade Familiar", expanded=True):
+        with st.expander("👁️ Ver Dados Detalhados", expanded=True):
             grid = st.columns(4)
             for i, col_nm in enumerate(df_base.columns):
                 with grid[i % 4]:
@@ -121,10 +121,9 @@ if df_base is not None:
                         <b style="font-size:0.85rem;">{dados_f[col_nm]}</b>
                     </div>''', unsafe_allow_html=True)
 
-    # --- 7. GRÁFICOS UNIFICADOS (REVISÃO DE QUANTIDADE TOTAL) ---
+    # --- 7. GRÁFICOS UNIFICADOS (REVISÃO DE QUANTIDADE) ---
     st.write("---")
     st.subheader("📊 Diagnóstico Situacional (Quantificação Absoluta)")
-    st.info("Gráficos revisados: categorias unificadas para refletir a contagem real da tabela.")
     
     
 
@@ -133,14 +132,14 @@ if df_base is not None:
 
     for idx, col_nome in enumerate(colunas_graficos):
         with g_layout[idx % 2]:
-            # Contagem real e unificada
+            # Agrupamento e contagem
             contagem = df_f[col_nome].value_counts().reset_index()
             contagem.columns = [col_nome, 'QTD']
             contagem = contagem.sort_values(by='QTD', ascending=True)
 
             fig = px.bar(
                 contagem, y=col_nome, x='QTD', orientation='h',
-                title=f"DISTRIBUIÇÃO: {col_nome}",
+                title=f"INDICADOR: {col_nome}",
                 color='QTD', color_continuous_scale='icefire', text='QTD'
             )
             fig.update_layout(
@@ -151,16 +150,13 @@ if df_base is not None:
             fig.update_traces(textposition='outside', textfont=dict(weight='bold', color='black'))
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- 8. EXPORTAÇÃO ---
+    # --- 8. DOWNLOAD (SIDEBAR) ---
     if st.session_state.lista_exportacao:
         st.sidebar.markdown("---")
         df_exp = df_base[df_base[COL_RESPONSAVEL].isin(st.session_state.lista_exportacao)]
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
             df_exp.to_excel(writer, index=False)
-        st.sidebar.download_button("🚀 Baixar Relatório das Selecionadas", buf.getvalue(), "Relatorio_CAS_Export.xlsx", use_container_width=True)
-        if st.sidebar.button("🗑️ Limpar Lista"):
-            st.session_state.lista_exportacao = []
-            st.rerun()
+        st.sidebar.download_button("🚀 Baixar Relatório Selecionado", buf.getvalue(), "Relatorio_CAS_Unificado.xlsx", use_container_width=True)
 else:
-    st.error("Planilha 'Planilha Matriculados' não encontrada.")
+    st.error("Planilha não encontrada. Verifique o arquivo na pasta.")
