@@ -3,8 +3,8 @@ import pandas as pd
 import os
 from io import BytesIO
 
-# 1. CONFIGURAÇÃO INICIAL
-st.set_page_config(page_title="Gestão CAS", layout="wide", page_icon="🏠")
+# 1. CONFIGURAÇÃO DA PÁGINA
+st.set_page_config(page_title="Gestão CAS 2026", layout="wide", page_icon="🏠")
 
 if 'lista_exportacao' not in st.session_state:
     st.session_state.lista_exportacao = []
@@ -32,7 +32,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CARREGAMENTO E LIMPEZA ---
+# --- 3. CARREGAMENTO E LIMPEZA (NAN -> TRAÇO) ---
 @st.cache_data
 def load_data():
     arquivos = [f for f in os.listdir('.') if "Planilha Matriculados" in f]
@@ -43,23 +43,25 @@ def load_data():
         df = pd.read_csv(path, dtype=str) if path.endswith('.csv') else pd.read_excel(path, dtype=str)
         df.columns = [str(c).strip().upper() for c in df.columns]
         
+        # Limpeza: Espaços e troca de vazios/NaN por "-"
         for col in df.columns:
             df[col] = df[col].fillna("-").astype(str).str.strip().str.upper()
-            df[col] = df[col].replace(['NAN', 'NONE', '', ' ', 'NULL'], '-')
+            df[col] = df[col].replace(['NAN', 'NONE', '', ' ', 'NULL', 'UNDEFINED'], '-')
         
         # Unidades Familiares (Responsáveis Únicos)
         df_familias = df[df["NOME DO RESPONSÁVEL"] != "-"].drop_duplicates(subset=["NOME DO RESPONSÁVEL"])
         
         return df, df_familias
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro no processamento: {e}")
         return None, None
 
 df_geral, df_familias = load_data()
 
 if df_geral is not None:
-    # --- 4. FILTROS ---
-    st.sidebar.header("🔍 Filtros")
+    # --- 4. FILTROS LATERAIS ---
+    st.sidebar.header("🔍 Filtros de Busca")
+    
     col_trab = "EXERCE ATIVIDADE REMUNERADA:"
     col_renda = "RENDA FAMILIAR TOTAL"
     col_benef = [c for c in df_geral.columns if "BENEFÍCIO" in c][0]
@@ -68,17 +70,17 @@ if df_geral is not None:
     f_renda = st.sidebar.multiselect("Renda:", sorted(df_familias[col_renda].unique()), default=list(df_familias[col_renda].unique()))
     f_benef = st.sidebar.multiselect("Benefício:", sorted(df_familias[col_benef].unique()), default=list(df_familias[col_benef].unique()))
 
-    # Aplicação do Filtro
+    # Aplicação do Filtro Dinâmico
     df_filtrado_fam = df_familias[
         (df_familias[col_trab].isin(f_trab)) & 
         (df_familias[col_renda].isin(f_renda)) &
         (df_familias[col_benef].isin(f_benef))
     ]
     
-    # Participantes vinculados
+    # Participantes vinculados (Pessoas em Atividade)
     total_pessoas = len(df_geral[df_geral["NOME DO RESPONSÁVEL"].isin(df_filtrado_fam["NOME DO RESPONSÁVEL"])])
 
-    # --- 5. DASHBOARD PRINCIPAL ---
+    # --- 5. DASHBOARD PRINCIPAL (MÉTRICAS CORRIGIDAS) ---
     st.markdown('<div class="main-header"><h1>Painel Socioeconômico CAS</h1></div>', unsafe_allow_html=True)
     
     m1, m2 = st.columns(2)
@@ -93,12 +95,12 @@ if df_geral is not None:
             <h2 style="margin:0; color:#1e293b; font-size: 2.5rem;">{len(df_filtrado_fam)}</h2>
         </div>""", unsafe_allow_html=True)
 
-    # Seleção
+    # Seleção de Responsável
     st.write("###")
     lista_nomes = sorted(df_filtrado_fam["NOME DO RESPONSÁVEL"].tolist())
-    selecionado = st.selectbox("🎯 Selecionar Responsável:", ["-- SELECIONE UM NOME --"] + lista_nomes)
+    selecionado = st.selectbox("🎯 Selecionar Responsável para Prontuário:", ["-- SELECIONE UM NOME --"] + lista_nomes)
 
-    # --- 6. PRONTUÁRIO ---
+    # --- 6. PRONTUÁRIO DETALHADO ---
     if selecionado != "-- SELECIONE UM NOME --":
         st.divider()
         familia_rows = df_geral[df_geral["NOME DO RESPONSÁVEL"] == selecionado]
@@ -106,6 +108,7 @@ if df_geral is not None:
 
         st.subheader(f"🏠 Ficha Social: {selecionado}")
         
+        # Grid de Informações (Raio-X)
         grid = st.columns(4)
         for i, col in enumerate(df_geral.columns):
             with grid[i % 4]:
@@ -115,7 +118,7 @@ if df_geral is not None:
                 </div>''', unsafe_allow_html=True)
 
         st.write("---")
-        st.write(f"### 👨‍👩‍👧‍👦 Membros da Família em Atividade ({len(familia_rows)})")
+        st.write(f"### 👨‍👩‍👧‍👦 Membros da Família Inscritos ({len(familia_rows)})")
         st.table(familia_rows[["NOME DO PARTICIPANTE (ATIVIDADES)", "ATIVIDADE DESEJADA", "TURNO", "IDADE (PARTICIPANTE)"]])
 
     # --- 7. EXPORTAÇÃO ---
@@ -133,4 +136,4 @@ if df_geral is not None:
                 df_exp.to_excel(writer, index=False)
             st.sidebar.download_button("Clique aqui para baixar", buf.getvalue(), "Relatorio_CAS.xlsx")
 else:
-    st.info("Planilha não encontrada. Verifique o arquivo 'Planilha Matriculados' na pasta.")
+    st.info("Arquivo 'Planilha Matriculados' não encontrado na pasta.")
