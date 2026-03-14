@@ -1,160 +1,146 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import os
 from io import BytesIO
 
-# 1. CONFIGURAÇÃO DA PÁGINA E ESTILO
-st.set_page_config(page_title="Gestão Sociodemográfica - CAS", layout="wide")
+# 1. CONFIGURAÇÃO DA PÁGINA
+st.set_page_config(page_title="Gestão de Vulnerabilidade CAS", layout="wide")
 
 st.markdown("""
     <style>
-    .main { background-color: #f8fafc; }
-    .card-info {
-        background-color: #ffffff;
+    .main { background-color: #ffffff; }
+    .card-cas {
+        background-color: #f1f5f9;
         padding: 20px;
         border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        border-left: 8px solid #1e40af;
+        border-top: 6px solid #1e3a8a;
+        margin-bottom: 15px;
+        box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
     }
-    .header-card { font-size: 18px; font-weight: bold; color: #1e40af; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 15px; }
+    .texto-preto { color: #000000 !important; font-size: 16px; font-weight: bold; margin-bottom: 5px; }
+    .label-info { color: #475569 !important; font-size: 13px; font-weight: bold; text-transform: uppercase; }
     .alerta-vulnerabilidade {
-        background: linear-gradient(90deg, #be123c 0%, #fb7185 100%);
-        color: white; padding: 15px; border-radius: 10px; text-align: center;
-        font-weight: bold; font-size: 20px; margin-bottom: 25px;
+        background-color: #fee2e2;
+        color: #991b1b;
+        padding: 15px;
+        border-radius: 10px;
+        border: 2px solid #ef4444;
+        text-align: center;
+        font-weight: bold;
+        font-size: 18px;
+        margin-bottom: 20px;
     }
-    .texto-preto { color: #000000 !important; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. CARREGAMENTO DE DADOS
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CAMINHO = os.path.join(BASE_DIR, "Planilha Matriculados.xlsx - Planilha1.csv")
-
+# 2. CARREGAMENTO AUTOMÁTICO (BUSCA QUALQUER ARQUIVO MATRICULADOS)
 @st.cache_data
-def carregar_dados(caminho):
-    if not os.path.exists(caminho): return None
-    try:
-        df = pd.read_csv(caminho, dtype=str)
-        df.columns = [str(c).strip().replace('\n', ' ') for c in df.columns]
-        return df
-    except: return None
+def localizar_e_carregar():
+    # Lista todos os arquivos na pasta atual
+    arquivos_na_pasta = os.listdir('.')
+    for arquivo in arquivos_na_pasta:
+        # Se o arquivo tiver "Planilha Matriculados" no nome
+        if "Planilha Matriculados" in arquivo:
+            try:
+                if arquivo.endswith('.csv'):
+                    df = pd.read_csv(arquivo, dtype=str)
+                else:
+                    df = pd.read_excel(arquivo, dtype=str)
+                
+                # Limpa nomes de colunas
+                df.columns = [str(c).strip().replace('\n', ' ') for c in df.columns]
+                return df
+            except:
+                continue
+    return None
 
-df_geral = carregar_dados(CAMINHO)
+df_geral = localizar_e_carregar()
 
 if df_geral is not None:
-    # Definição de Colunas
-    col_resp = "NOME DO RESPONSÁVEL:"
+    # Colunas cruciais
+    col_t = "NOME DO RESPONSÁVEL:"
     col_renda = "RENDA FAMILIAR MENSAL TOTAL:"
-    col_trampo = "EXERCE ATIVIDADE REMUNERADA:"
-    col_benef = "A FAMÍLIA É BENEFICIÁRIA DE ALGUM PROGRAMA SOCIAL GOVERNAMENTAL:"
-    col_moradia = "SITUAÇÃO DA MORADIA:"
-
-    # Criar base apenas de Responsáveis (Linhas com Coluna T preenchida)
-    df_responsaveis = df_geral[df_geral[col_resp].notna() & (df_geral[col_resp].str.strip() != "")].copy()
-
-    # Ranking de Renda para Ordenação (Vulneráveis Primeiro)
-    rank_map = {"SEM RENDA": 0, "ATÉ R$ 405,26": 1, "DE R$ 405,26 A R$ 810,50": 2, "DE R$ 810,50 A R$ 1.215,76": 3}
+    col_trabalho = "EXERCE ATIVIDADE REMUNERADA:"
     
-    # --- BARRA LATERAL: FILTROS TÉCNICOS ---
-    st.sidebar.title("🛡️ Filtros de Triagem")
-    
-    f_renda = st.sidebar.selectbox("Filtrar por Renda:", ["Todos"] + list(rank_map.keys()))
-    f_trampo = st.sidebar.selectbox("Filtrar por Ocupação:", ["Todos"] + sorted(df_responsaveis[col_trampo].unique().tolist()))
+    # Base apenas de responsáveis (Filtro da Coluna T preenchida)
+    df_resp = df_geral[df_geral[col_t].notna() & (df_geral[col_t].str.strip() != "")].copy()
 
-    # Aplicação dos Filtros na base de responsáveis
-    df_filtrado = df_responsaveis.copy()
+    # --- SIDEBAR (FILTROS À ESQUERDA) ---
+    st.sidebar.header("⚖️ Filtros de Vulnerabilidade")
+    
+    # 1. Filtro de Renda (Ordenado da maior vulnerabilidade para a menor)
+    ordem_renda = ["SEM RENDA", "ATÉ R$ 405,26", "DE R$ 405,26 A R$ 810,50", "DE R$ 810,50 A R$ 1.215,76"]
+    opcoes_renda = ["Todos"] + [r for r in ordem_renda if r in df_resp[col_renda].unique()]
+    f_renda = st.sidebar.selectbox("Filtro de Renda:", opcoes_renda)
+    
+    # 2. Filtro de Trabalho (Sim, Não, Temporário...)
+    opcoes_trab = ["Todos"] + sorted(df_resp[col_trabalho].unique().astype(str).tolist())
+    f_trab = st.sidebar.selectbox("Vínculo de Trabalho:", opcoes_trab)
+
+    # Filtrar a lista de responsáveis com base nos filtros econômicos
+    df_filtrado = df_resp.copy()
     if f_renda != "Todos":
         df_filtrado = df_filtrado[df_filtrado[col_renda] == f_renda]
-    if f_trampo != "Todos":
-        df_filtrado = df_filtrado[df_filtrado[col_trampo] == f_trampo]
+    if f_trab != "Todos":
+        df_filtrado = df_filtrado[df_filtrado[col_trabalho] == f_trab]
 
-    # Ordenação por Vulnerabilidade
-    df_filtrado['rank'] = df_filtrado[col_renda].map(lambda x: rank_map.get(str(x).upper(), 99))
-    lista_nomes = df_filtrado.sort_values(by=['rank', col_resp])[col_resp].tolist()
+    # 3. Filtro do Responsável Familiar
+    lista_nomes = sorted(df_filtrado[col_t].unique().tolist())
+    selecionado = st.sidebar.selectbox(f"Selecione o Responsável ({len(lista_nomes)}):", ["Selecione..."] + lista_nomes)
 
-    selecionado = st.sidebar.selectbox("🎯 Selecione o Responsável:", ["Selecione..."] + lista_nomes)
-
-    # --- ÁREA PRINCIPAL ---
-    st.markdown("<h1 style='color: #1e3a8a;'>Sociodemográfico das Famílias - CAS</h1>", unsafe_allow_html=True)
+    # --- PAINEL DE CAIXINHAS (DIREITA) ---
+    st.markdown("<h1 style='color: #1e3a8a;'>Painel Técnico de Vulnerabilidade Social</h1>", unsafe_allow_html=True)
 
     if selecionado != "Selecione...":
-        dados_familia = df_geral[df_geral[col_resp] == selecionado]
-        chefe = df_responsaveis[df_responsaveis[col_resp] == selecionado].iloc[0]
-        renda_at = str(chefe[col_renda]).upper()
+        # Pega a linha do responsável e todas as linhas da família (dependentes)
+        chefe = df_resp[df_resp[col_t] == selecionado].iloc[0]
+        familia = df_geral[df_geral[col_t] == selecionado]
 
-        # Alerta de Risco Máximo
-        if rank_map.get(renda_at, 99) <= 1:
-            st.markdown(f'<div class="alerta-vulnerabilidade">🚨 PRIORIDADE SOCIAL: Família em situação de {renda_at}</div>', unsafe_allow_html=True)
+        # Alerta se for Sem Renda ou Renda Baixa
+        if chefe[col_renda] in ["SEM RENDA", "ATÉ R$ 405,26"]:
+            st.markdown(f'<div class="alerta-vulnerabilidade">⚠️ ALERTA: Família em situação crítica de vulnerabilidade ({chefe[col_renda]})</div>', unsafe_allow_html=True)
 
-        # Painel de Cards
-        c1, c2 = st.columns(2)
+        # LINHA DE CAIXINHAS (CARDS)
+        c1, c2, c3 = st.columns(3)
+        
         with c1:
-            st.markdown(f"""
-            <div class="card-info">
-                <div class="header-card">📍 Localização e Contato</div>
-                <p class="texto-preto">Endereço: {chefe.get('ENDEREÇO COMPLETO:', 'N/A')}</p>
+            st.markdown(f"""<div class="card-cas">
+                <p class="label-info">📍 Localização e Contato</p>
                 <p class="texto-preto">Bairro: {chefe.get('BAIRRO:', 'N/A')}</p>
-                <p class="texto-preto">Contato: {chefe.get('CONTATO:', 'N/A')}</p>
-            </div>
-            """, unsafe_allow_html=True)
+                <p class="texto-preto">Endereço: {chefe.get('ENDEREÇO COMPLETO:', 'N/A')}</p>
+                <p class="texto-preto">Telefone: {chefe.get('CONTATO:', 'N/A')}</p>
+            </div>""", unsafe_allow_html=True)
 
         with c2:
-            st.markdown(f"""
-            <div class="card-info">
-                <div class="header-card">💰 Status Socioeconômico</div>
-                <p class="texto-preto">Renda Total: {renda_at}</p>
-                <p class="texto-preto">Trabalha? {chefe.get(col_trampo, 'N/A')}</p>
-                <p class="texto-preto">Benefício Social: {chefe.get(col_benef, 'N/A')}</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="card-cas">
+                <p class="label-info">💰 Indicadores Econômicos</p>
+                <p class="texto-preto">Renda: {chefe.get(col_renda, 'N/A')}</p>
+                <p class="texto-preto">Trabalha? {chefe.get(col_trabalho, 'N/A')}</p>
+                <p class="texto-preto">Moradia: {chefe.get('SITUAÇÃO DA MORADIA:', 'N/A')}</p>
+            </div>""", unsafe_allow_html=True)
 
-        # Composição Familiar
-        st.subheader("👥 Composição Familiar")
-        st.dataframe(dados_familia[['NOME:', 'IDADE:', 'GÊNERO:', 'GRAU DE PARENTESCO:']], use_container_width=True, hide_index=True)
+        with c3:
+            st.markdown(f"""<div class="card-cas">
+                <p class="label-info">🛡️ Benefícios e Grupo</p>
+                <p class="texto-preto">Recebe Benefício? {chefe.get('A FAMÍLIA É BENEFICIÁRIA DE ALGUM PROGRAMA SOCIAL GOVERNAMENTAL:', 'N/A')}</p>
+                <p class="texto-preto">Quais? {chefe.get('INFORMA O(S) PROGRAMA(S):', 'Não informado')}</p>
+                <p class="texto-preto">Total de Pessoas: {chefe.get('NÚMERO DE PESSOAS NO GRUPO FAMILIAR:', 'N/A')}</p>
+            </div>""", unsafe_allow_html=True)
 
-        # Gestão de Dados e Exportação
-        st.divider()
-        col_exp1, col_exp2 = st.columns([1, 2])
-        
-        with col_exp1:
+        # TABELA DE EXPANSÃO TOTAL (TODOS OS DADOS CORRELACIONADOS)
+        st.write("---")
+        st.subheader(f"📂 Dados Detalhados do Grupo Familiar ({len(familia)} pessoas)")
+        with st.expander("CLIQUE AQUI PARA EXPANDIR E VER AS 56 COLUNAS DA FAMÍLIA", expanded=False):
+            st.dataframe(familia, use_container_width=True)
+            
+            # Botão para baixar a ficha
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                dados_familia.to_excel(writer, index=False, sheet_name='Ficha_Social')
-            st.download_button(
-                label="📥 Exportar Ficha em Excel",
-                data=output.getvalue(),
-                file_name=f"Ficha_{selecionado.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                familia.to_excel(writer, index=False)
+            st.download_button(f"📥 Baixar Excel de {selecionado}", output.getvalue(), f"Ficha_{selecionado}.xlsx")
 
-        with col_exp2:
-            with st.expander("🔍 Ver todos os 56 campos da planilha"):
-                st.dataframe(dados_familia, use_container_width=True)
-
-    # --- COMPLEMENTO ESTATÍSTICO (RODAPÉ) ---
-    st.write("###")
-    st.divider()
-    st.markdown("<h2 style='text-align: center; color: #475569;'>📊 Visão Geral do Cadastro (Base Responsáveis)</h2>", unsafe_allow_html=True)
-    
-    
-
-    g1, g2 = st.columns(2)
-    with g1:
-        fig1 = px.bar(df_responsaveis['GÊNERO:'].value_counts().reset_index(), 
-                     x='GÊNERO:', y='count', text='count', 
-                     title="Gênero dos Responsáveis", color_discrete_sequence=['#3b82f6'])
-        fig1.update_traces(textposition='outside')
-        st.plotly_chart(fig1, use_container_width=True)
-        
-    with g2:
-        fig2 = px.bar(df_responsaveis[col_renda].value_counts().reset_index(), 
-                     x=col_renda, y='count', text='count', 
-                     title="Distribuição de Renda", color_discrete_sequence=['#e11d48'])
-        fig2.update_traces(textposition='outside')
-        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("👈 Use os filtros de Renda e Trabalho na esquerda para localizar as famílias.")
 
 else:
-    st.error("⚠️ Planilha não detectada. Verifique o arquivo no repositório.")
+    st.error("❌ Erro: Não encontramos nenhum arquivo com o nome 'Planilha Matriculados' na pasta do projeto.")
